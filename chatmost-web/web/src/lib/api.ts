@@ -1,5 +1,6 @@
 import { createContext, useContext, createElement, type ReactNode } from "react";
 import dataset from "../data/dataset.json";
+import streamelementsDataset from "../data/streamelements-dataset.json";
 import { convexHttpClient, isConvexActive } from "./convex";
 
 export interface Target {
@@ -435,6 +436,20 @@ export const api = {
     }
 
     return list;
+  },
+
+  // StreamElements Stats & Metadata
+  streamelementsStats: () => {
+    return streamelementsDataset.stats;
+  },
+  streamelementsChatters: () => {
+    return streamelementsDataset.chatters;
+  },
+  streamelementsEmotes: () => {
+    return streamelementsDataset.emotes;
+  },
+  streamelementsCommands: () => {
+    return streamelementsDataset.commands;
   },
 };
 

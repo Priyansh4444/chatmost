@@ -18,7 +18,7 @@ import {
   Search,
 } from "lucide-react";
 
-type StatsTab = "feud" | "chatters" | "lexicon" | "slang" | "inspector";
+type StatsTab = "feud" | "chatters" | "lexicon" | "global" | "slang" | "inspector";
 
 interface AutocompleteItem {
   label: string;
@@ -33,6 +33,14 @@ export function Stats() {
   const [error, setError] = useState<string | null>(null);
   const [chatterSearch, setChatterSearch] = useState("");
   const [emoteViewMode, setEmoteViewMode] = useState<"top" | "rarest" | "all">("top");
+
+  // StreamElements Sub-View State
+  const [seSubTab, setSeSubTab] = useState<"chatters" | "7tv" | "twitch" | "bttv_ffz" | "commands">("chatters");
+  const [seSearch, setSeSearch] = useState("");
+  const seStats = useMemo(() => api.streamelementsStats(), []);
+  const seChatters = useMemo(() => api.streamelementsChatters(), []);
+  const seEmotes = useMemo(() => api.streamelementsEmotes(), []);
+  const seCommands = useMemo(() => api.streamelementsCommands(), []);
 
   // Chatter Profile Dialog State
   const [selectedProfile, setSelectedProfile] = useState<ChatterProfile | null>(null);
@@ -261,6 +269,7 @@ export function Stats() {
           { id: "feud", label: "Chat Feud" },
           { id: "chatters", label: "Top Chatters" },
           { id: "lexicon", label: "Emotes" },
+          { id: "global", label: "StreamElements (1.5M)" },
           { id: "slang", label: "Slang Trends" },
           { id: "inspector", label: "Target Inspector" },
         ].map((tab) => (
@@ -602,6 +611,220 @@ export function Stats() {
               valueUnit="uses"
             />
           </div>
+        </div>
+      )}
+
+      {/* TAB: STREAMELEMENTS GLOBAL */}
+      {activeTab === "global" && (
+        <div className="flex flex-col gap-4">
+          {/* Header & Source Info */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border border-zinc-800 bg-zinc-900/40 p-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-zinc-100">
+                  StreamElements Official All-Time Stats
+                </span>
+                <span className="px-1.5 py-0.5 text-[9px] font-mono bg-indigo-950 text-indigo-400 border border-indigo-500/30 font-semibold">
+                  Live Records
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400 mt-0.5 font-mono">
+                Tracking jo2uke Twitch chat since January 9th, 2016
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 text-xs font-mono text-zinc-400">
+              <span><strong className="text-zinc-100 font-semibold">{formatNumber(seStats.messages)}</strong> messages</span>
+              <span className="text-zinc-600">·</span>
+              <span><strong className="text-zinc-100 font-semibold">{formatNumber(seStats.chatters)}</strong> unique chatters</span>
+              <span className="text-zinc-600">·</span>
+              <a
+                href="https://stats.streamelements.com/c/jo2uke"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-indigo-400 hover:text-indigo-300 underline underline-offset-4"
+              >
+                streamelements.com ↗
+              </a>
+            </div>
+          </div>
+
+          {/* Sub-Tabs */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 pb-2">
+            <div className="flex flex-wrap items-center gap-1">
+              {[
+                { id: "chatters", label: "Top 100 Chatters" },
+                { id: "7tv", label: "7TV Emotes" },
+                { id: "twitch", label: "Twitch Emotes" },
+                { id: "bttv_ffz", label: "BTTV & FFZ" },
+                { id: "commands", label: "Bot Commands" },
+              ].map((sub) => (
+                <button
+                  key={sub.id}
+                  type="button"
+                  onClick={() => {
+                    setSeSubTab(sub.id as any);
+                    setSeSearch("");
+                  }}
+                  className={cn(
+                    "px-3 py-1 text-xs transition-colors rounded-none border",
+                    seSubTab === sub.id
+                      ? "border-zinc-300 bg-zinc-100 text-zinc-900 font-semibold"
+                      : "border-zinc-800 bg-zinc-900/40 text-zinc-400 hover:text-zinc-200"
+                  )}
+                >
+                  {sub.label}
+                </button>
+              ))}
+            </div>
+
+            {(seSubTab === "chatters" || seSubTab === "commands") && (
+              <div className="w-48">
+                <Input
+                  value={seSearch}
+                  onChange={(e) => setSeSearch(e.target.value)}
+                  placeholder={seSubTab === "chatters" ? "Search chatter..." : "Search command..."}
+                  className="border-zinc-800 bg-zinc-950 text-xs font-sans text-zinc-100 placeholder:text-zinc-600 h-7"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Sub Tab: Chatters */}
+          {seSubTab === "chatters" && (
+            <div className="border border-zinc-800 bg-zinc-950 max-h-[500px] overflow-y-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-b border-zinc-800 bg-zinc-900/60 text-xs">
+                    <TableHead className="w-16 text-center font-mono">Rank</TableHead>
+                    <TableHead>Chatter</TableHead>
+                    <TableHead className="text-right font-mono">Messages</TableHead>
+                    <TableHead className="text-right font-mono">% of 1.5M Volume</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {seChatters
+                    .filter((c: any) => !seSearch.trim() || c.displayName.toLowerCase().includes(seSearch.trim().toLowerCase()))
+                    .map((c: any, idx: number) => {
+                      const pct = (c.messages / seStats.messages) * 100;
+                      return (
+                        <TableRow key={c.login} className="border-b border-zinc-850 hover:bg-zinc-900/50 transition-colors">
+                          <TableCell className="text-center font-mono text-xs text-zinc-500 tabular-nums">
+                            #{c.rank || idx + 1}
+                          </TableCell>
+                          <TableCell className="font-medium text-zinc-200">
+                            {c.displayName}
+                            {c.login === "streamelements" && (
+                              <span className="ml-2 px-1 py-0.2 text-[9px] font-mono bg-zinc-800 text-zinc-400 border border-zinc-700">
+                                BOT
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs text-zinc-100 font-semibold tabular-nums">
+                            {formatNumber(c.messages)}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs text-zinc-400 tabular-nums">
+                            {pct.toFixed(2)}%
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          {/* Sub Tab: 7TV */}
+          {seSubTab === "7tv" && (
+            <div className="border border-zinc-800 bg-zinc-900/30 p-4 max-h-[500px] overflow-y-auto">
+              <RankedBarList
+                data={(seEmotes["7tv"] || []).map((e: any, idx: number) => ({
+                  label: e.name,
+                  count: e.total,
+                  url: e.url,
+                  rank: idx + 1,
+                }))}
+                valueUnit="uses"
+              />
+            </div>
+          )}
+
+          {/* Sub Tab: Twitch */}
+          {seSubTab === "twitch" && (
+            <div className="border border-zinc-800 bg-zinc-900/30 p-4 max-h-[500px] overflow-y-auto">
+              <RankedBarList
+                data={(seEmotes["twitch"] || []).map((e: any, idx: number) => ({
+                  label: e.name,
+                  count: e.total,
+                  url: e.url,
+                  rank: idx + 1,
+                }))}
+                valueUnit="uses"
+              />
+            </div>
+          )}
+
+          {/* Sub Tab: BTTV & FFZ */}
+          {seSubTab === "bttv_ffz" && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="border border-zinc-800 bg-zinc-900/30 p-4 max-h-[500px] overflow-y-auto">
+                <div className="text-xs font-semibold text-zinc-200 mb-3">BetterTTV Emotes</div>
+                <RankedBarList
+                  data={(seEmotes["bttv"] || []).map((e: any, idx: number) => ({
+                    label: e.name,
+                    count: e.total,
+                    url: e.url,
+                    rank: idx + 1,
+                  }))}
+                  valueUnit="uses"
+                />
+              </div>
+              <div className="border border-zinc-800 bg-zinc-900/30 p-4 max-h-[500px] overflow-y-auto">
+                <div className="text-xs font-semibold text-zinc-200 mb-3">FrankerFaceZ Emotes</div>
+                <RankedBarList
+                  data={(seEmotes["ffz"] || []).map((e: any, idx: number) => ({
+                    label: e.name,
+                    count: e.total,
+                    url: e.url,
+                    rank: idx + 1,
+                  }))}
+                  valueUnit="uses"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Sub Tab: Commands */}
+          {seSubTab === "commands" && (
+            <div className="border border-zinc-800 bg-zinc-950 max-h-[500px] overflow-y-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-b border-zinc-800 bg-zinc-900/60 text-xs">
+                    <TableHead className="w-16 text-center font-mono">Rank</TableHead>
+                    <TableHead>Command</TableHead>
+                    <TableHead className="text-right font-mono">Executions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {seCommands
+                    .filter((cmd: any) => !seSearch.trim() || cmd.command.toLowerCase().includes(seSearch.trim().toLowerCase()))
+                    .map((cmd: any, idx: number) => (
+                      <TableRow key={cmd.command} className="border-b border-zinc-850 hover:bg-zinc-900/50 transition-colors">
+                        <TableCell className="text-center font-mono text-xs text-zinc-500 tabular-nums">
+                          #{idx + 1}
+                        </TableCell>
+                        <TableCell className="font-mono font-semibold text-indigo-400">
+                          {cmd.command}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs text-zinc-100 font-semibold tabular-nums">
+                          {formatNumber(cmd.amount)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </div>
       )}
 
