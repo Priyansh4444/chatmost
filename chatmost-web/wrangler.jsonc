@@ -1,23 +1,11 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "chatmost",
-  "main": "worker/src/index.ts",
+  "name": "chatmost-live",
   "compatibility_date": "2026-01-01",
-  "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "./web/dist",
-    "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
-    "run_worker_first": true
+    "not_found_handling": "single-page-application"
   },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "chatmost",
-      "database_id": "3b253c5d-a71a-4486-acc9-1eac0883d511",
-      "migrations_dir": "migrations"
-    }
-  ],
   "observability": {
     "enabled": true
   }

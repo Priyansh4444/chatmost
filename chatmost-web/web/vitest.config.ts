@@ -6,14 +6,11 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
   test: {
-    poolOptions: {
-      workers: {
-        wrangler: { configPath: "../wrangler.jsonc" },
-      },
-    },
+    environment: "node",
+    include: ["web/src/**/*.{test,spec}.{ts,tsx}", "src/**/*.{test,spec}.{ts,tsx}"],
   },
 });

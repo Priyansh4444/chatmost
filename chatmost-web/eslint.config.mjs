@@ -24,6 +24,9 @@ export default [
     rules: {
       "react-compiler/react-compiler": "error",
       ...reactHooks.configs.recommended.rules,
+      // exhaustive-deps is superseded by the React Compiler (babel-plugin-react-compiler),
+      // which memoizes values based on actual data flow; keep the rest of the compiler rules.
+      "react-hooks/exhaustive-deps": "off",
       "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
       "no-undef": "off",
       "no-unused-vars": "off",
