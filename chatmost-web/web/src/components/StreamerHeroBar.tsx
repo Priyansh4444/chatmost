@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useStreamer } from "@/lib/streamerContext";
 import { ArrowLeftRight, ExternalLink, RefreshCw, Trash2 } from "lucide-react";
 import { formatNumber, cn } from "@/lib/utils";
@@ -17,28 +17,25 @@ export function StreamerHeroBar() {
     ingestProgress,
   } = useStreamer();
 
-  const [confirmingClear, setConfirmingClear] = useState(false);
-  const confirmTimerRef = useRef<number | null>(null);
+  const [confirm, setConfirm] = useState<{ channel: string; armed: boolean }>({ channel, armed: false });
+
+  // Disarm the confirm the moment the channel changes (adjusting state during
+  // render — React 18 idiom). Once armed, the confirm stays armed until the
+  // user confirms (clears) or switches channel: no short auto-expire, because
+  // a "Click again to confirm" that silently expires makes the button look
+  // broken.
+  if (confirm.channel !== channel) {
+    setConfirm({ channel, armed: false });
+  }
 
   const handleClearCache = () => {
-    if (!confirmingClear) {
-      setConfirmingClear(true);
-      confirmTimerRef.current = window.setTimeout(() => setConfirmingClear(false), 4000);
+    if (!confirm.armed) {
+      setConfirm({ channel, armed: true });
       return;
     }
-    if (confirmTimerRef.current !== null) {
-      window.clearTimeout(confirmTimerRef.current);
-      confirmTimerRef.current = null;
-    }
-    setConfirmingClear(false);
+    setConfirm({ channel, armed: false });
     void clearArchives();
   };
-
-  useEffect(() => {
-    return () => {
-      if (confirmTimerRef.current !== null) window.clearTimeout(confirmTimerRef.current);
-    };
-  }, []);
 
   const isArchiveFailed = ingestProgress.status === "error";
   const isIngesting = ingestProgress.status === "ingesting";
@@ -158,18 +155,18 @@ export function StreamerHeroBar() {
           type="button"
           onClick={handleClearCache}
           title={
-            confirmingClear
+            confirm.armed
               ? "Click again to confirm — wipes all cached chat archives and rebuilds from scratch"
               : "Wipe all cached chat archives and rebuild from scratch"
           }
           className={`flex items-center gap-2 border px-3 py-1.5 font-mono text-xs font-bold transition-[border-color,color,background-color] ${
-            confirmingClear
+            confirm.armed
               ? "border-red-500 bg-red-950/60 text-red-200 animate-pulse"
               : "border-zinc-700 text-zinc-400 hover:text-red-400 hover:border-red-500/50"
           }`}
         >
           <Trash2 className="h-3.5 w-3.5" />
-          <span>{confirmingClear ? "Click again to confirm" : "Clear Cache"}</span>
+          <span>{confirm.armed ? "Click again to confirm" : "Clear Cache"}</span>
         </button>
         <button
           type="button"

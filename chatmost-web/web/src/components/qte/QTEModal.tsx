@@ -73,6 +73,7 @@ export function QTEModal({
   const voteP2Ref = useRef(0);
   const voterMapRef = useRef<Map<string, "p1" | "p2" | "spare" | "ban">>(new Map());
   const hasInitializedRef = useRef(false);
+  const skipInputRef = useRef(false);
 
   useEffect(() => {
     voteP1Ref.current = voteCountP1;
@@ -197,13 +198,15 @@ export function QTEModal({
     return () => clearTimeout(readyTimer);
   }, [isOpen, phase, soundEnabled]);
 
-  // 4. INPUT TIMER (15.00s) — REAL CHAT DEFENSE LISTENER
+  // 4. INPUT TIMER (60.00s) — REAL CHAT DEFENSE LISTENER
   useEffect(() => {
     if (!isOpen || phase !== "input") return;
 
     const startTime = Date.now();
     const durationMs = TOTAL_DEFENSE_SECONDS * 1000;
     let lastTickSecond = Math.ceil(TOTAL_DEFENSE_SECONDS);
+    // A streamer "Skip" click ends the defense window immediately.
+    skipInputRef.current = false;
 
     // Listen to real Twitch IRC messages for the chosen chatters' defenses
     const unsubMsg = twitchChat.onMessage((msg: TwitchChatMessage) => {
@@ -234,7 +237,7 @@ export function QTEModal({
 
     const interval = setInterval(() => {
       const elapsed = Date.now() - startTime;
-      const remaining = Math.max(0, (durationMs - elapsed) / 1000);
+      const remaining = skipInputRef.current ? 0 : Math.max(0, (durationMs - elapsed) / 1000);
       setInputTimeLeft(remaining);
 
       const wholeSec = Math.ceil(remaining);
@@ -521,7 +524,7 @@ export function QTEModal({
           )}
 
           {/* ───────────────────────────────────────────────────────────── */}
-          {/* PHASE 4: 15-SECOND DEFENSE WINDOW (REAL CHAT INPUT) */}
+          {/* PHASE 4: 60-SECOND DEFENSE WINDOW (REAL CHAT INPUT) */}
           {/* ───────────────────────────────────────────────────────────── */}
           {phase === "input" && (
             <div className="w-full flex flex-col items-center gap-3.5 animate-qte-slide-up">
@@ -533,8 +536,19 @@ export function QTEModal({
                   </span>
                   <span className="text-sm font-bold text-white mt-0.5">{prompt.title}</span>
                 </div>
-                {/* 15.00s Countdown Display */}
+                {/* 60.00s Countdown Display + Skip */}
                 <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      skipInputRef.current = true;
+                      setInputTimeLeft(0);
+                    }}
+                    className="flex items-center gap-1 px-2 py-1 border border-white/15 bg-white/5 text-[9px] font-mono font-bold text-zinc-300 hover:bg-white/10 hover:text-white transition-colors uppercase tracking-wider"
+                    title="Skip the 60s defense window and move straight to voting"
+                  >
+                    Skip »
+                  </button>
                   <Clock
                     className={cn(
                       "h-4 w-4",

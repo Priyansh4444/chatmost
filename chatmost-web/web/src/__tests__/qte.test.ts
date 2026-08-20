@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { getRandomPrompt, SOLO_CRIMES, DUO_PROMPTS } from "../lib/qtePrompts";
 import { qteAudio } from "../lib/qteAudio";
+import { buildQteChatterPool } from "../lib/qteChatters";
 
 describe("QTE System Prompts & Logic", () => {
   it("generates default pure timeout defense prompts when flavor crimes are off", () => {
@@ -30,5 +31,50 @@ describe("QTE System Prompts & Logic", () => {
     expect(() => qteAudio.playCountdownTick(5)).not.toThrow();
     expect(() => qteAudio.playBanHammer()).not.toThrow();
     expect(() => qteAudio.playVictoryFanfare()).not.toThrow();
+  });
+});
+
+describe("QTE chatter pool (live chat drafting)", () => {
+  const now = Date.now();
+  const msg = (username: string, displayName = username, ts = now) => ({
+    username,
+    displayName,
+    timestamp: ts,
+  });
+
+  it("never drafts StreamElements, Nightbot, or other known bots", () => {
+    const pool = buildQteChatterPool(
+      [
+        msg("streamelements", "StreamElements"),
+        msg("nightbot", "Nightbot"),
+        msg("streamlabs"),
+        msg("RealViewer"),
+        msg("AnotherViewer"),
+      ],
+      now,
+      5 * 60 * 1000
+    );
+    const logins = pool.map((p) => p.username.toLowerCase());
+    expect(logins).not.toContain("streamelements");
+    expect(logins).not.toContain("nightbot");
+    expect(logins).not.toContain("streamlabs");
+    expect(logins).toContain("realviewer");
+    expect(logins).toContain("anotherviewer");
+  });
+
+  it("dedupes by username and only keeps messages inside the activity window", () => {
+    const old = now - 10 * 60 * 1000;
+    const pool = buildQteChatterPool(
+      [
+        msg("viewer_a", "ViewerA"),
+        msg("viewer_a", "ViewerA"), // dup
+        msg("viewer_b", "ViewerB", old), // stale -> dropped
+        msg("viewer_c", "ViewerC"),
+      ],
+      now,
+      5 * 60 * 1000
+    );
+    const logins = pool.map((p) => p.username).sort();
+    expect(logins).toEqual(["viewer_a", "viewer_c"]);
   });
 });

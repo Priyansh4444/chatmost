@@ -5,6 +5,7 @@ import {
   type QTEPrompt,
 } from "@/lib/qteTypes";
 import { getRandomPrompt } from "@/lib/qtePrompts";
+import { buildQteChatterPool } from "@/lib/qteChatters";
 import { QTEModal } from "@/components/qte/QTEModal";
 import { useTwitchChat } from "@/hooks/useTwitchChat";
 import { useEmoteMap } from "@/lib/renderChatEmotes";
@@ -82,33 +83,17 @@ export function QTEFloatingWidget({ channel }: QTEFloatingWidgetProps) {
   const [chatterCount, setChatterCount] = useState(0);
   const [chatVelocity, setChatVelocity] = useState(0);
 
-  // Recompute chatter pool from live messages
+  // Recompute chatter pool from live messages (bots excluded — StreamElements,
+  // Nightbot, etc. can never be drafted into a QTE)
   const recomputeChatters = useCallback(() => {
     const now = Date.now();
-    const cutoff = now - ACTIVITY_WINDOW_MS;
-    const seen = new Map<string, QTEParticipant>();
-
-    for (const msg of messages) {
-      if (msg.timestamp < cutoff) continue;
-      const key = msg.username.toLowerCase();
-      if (!seen.has(key)) {
-        seen.set(key, {
-          username: msg.username,
-          displayName: msg.displayName,
-          color: msg.color || "#a855f7",
-          votes: 0,
-        });
-      }
-    }
-
-    const pool = Array.from(seen.values());
-    recentChattersRef.current = pool;
-    setActiveChatterPool(pool);
+    recentChattersRef.current = buildQteChatterPool(messages, now, ACTIVITY_WINDOW_MS);
+    setActiveChatterPool(recentChattersRef.current);
 
     const velCutoff = now - 60_000;
     msgsPerMinuteRef.current = messages.filter((m) => m.timestamp >= velCutoff).length;
 
-    setChatterCount(pool.length);
+    setChatterCount(recentChattersRef.current.length);
     setChatVelocity(msgsPerMinuteRef.current);
   }, [messages]);
 

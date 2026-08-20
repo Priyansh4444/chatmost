@@ -19,3 +19,9 @@ chatmost/target/
 **/*.db
 **/*.sqlite
 chatmost-web/web/src/data/
+
+# Playwright e2e artifacts (real channel archives are sensitive — never commit)
+chatmost-web/web/e2e/fixtures/
+chatmost-web/web/e2e/.profile/
+chatmost-web/web/e2e/test-results/
+chatmost-web/web/playwright-report/
