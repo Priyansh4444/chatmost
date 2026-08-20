@@ -1,7 +1,7 @@
 import { cn, formatNumber } from "@/lib/utils";
 import { EmoteDisplay } from "@/components/emote";
 
-export interface RankedBarItem {
+interface RankedBarItem {
   label: string;
   count: number;
   url?: string | null;
@@ -32,22 +32,22 @@ export function RankedBarList({
 
         return (
           <div
-            key={`${item.label}-${idx}`}
+            key={`${item.rank ?? "unranked"}:${item.label}:${item.url ?? "no-url"}`}
             className={cn(
               "group relative flex items-center justify-between p-2.5 transition-none",
               item.isAnswer ? "bg-primary/10" : "hover:bg-muted/30"
             )}
           >
-            {/* Brutalist Rectangular Progress Meter Fill */}
+            {/* Progress Meter Fill with Smooth Motion */}
             <div
               aria-hidden
               className={cn(
-                "pointer-events-none absolute inset-y-0 left-0 transition-none",
+                "pointer-events-none absolute inset-y-0 left-0 transition-all duration-700 ease-out",
                 item.isAnswer
                   ? "bg-primary/20"
                   : rank === 1
-                  ? "bg-gold/15"
-                  : "bg-muted/40"
+                  ? "bg-primary/15"
+                  : "bg-white/[0.04]"
               )}
               style={{ width: `${pctOfMax}%` }}
             />

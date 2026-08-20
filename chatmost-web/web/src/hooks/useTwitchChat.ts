@@ -1,37 +1,51 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { twitchChat, type TwitchChatMessage, type ConnectionStatus, type ActiveChoice } from "@/lib/twitchChat";
 
 export interface LiveVoteEvent {
   voter: string;
   choiceIndex: number;
   choiceName: string;
+  matchedToken?: string;
   timestamp: number;
+  text: string;
+  isOverride?: boolean;
+  previousChoiceName?: string;
 }
 
 export function useTwitchChat(
   activeChoices: ActiveChoice[] = [],
-  enabled = true
+  enabled = true,
+  targetChannel?: string
 ) {
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
   const [messages, setMessages] = useState<TwitchChatMessage[]>([]);
-  const [votes, setVotes] = useState<number[]>([0, 0, 0, 0]);
+  const [votes, setVotes] = useState<number[]>([]);
   const [recentVotes, setRecentVotes] = useState<LiveVoteEvent[]>([]);
   const [lastMessageAt, setLastMessageAt] = useState<number | null>(null);
 
-  // Map of voter username -> choiceIndex (ensures 1 vote per chatter per round)
-  const voterMapRef = useRef<Map<string, number>>(new Map());
+  // Map of voter username -> { choiceIndex, choiceName } (tracks active vote & overrides)
+  const voterMapRef = useRef<Map<string, { choiceIndex: number; choiceName: string }>>(new Map());
+
+  // Switch channel dynamically if targetChannel changes (state is already fresh
+  // because the parent pages remount per channel via key={channel})
+  useEffect(() => {
+    if (targetChannel && targetChannel.trim() && targetChannel.toLowerCase() !== twitchChat.currentChannel) {
+      twitchChat.setChannel(targetChannel.trim().toLowerCase());
+      voterMapRef.current.clear();
+    }
+  }, [targetChannel]);
 
   // Update active choices on the client
   useEffect(() => {
     twitchChat.setActiveChoices(activeChoices);
   }, [activeChoices]);
 
-  // Reset votes on new question
-  const resetVotes = useCallback(() => {
+  // Reset votes on new round/question
+  const resetVotes = () => {
     voterMapRef.current.clear();
-    setVotes([0, 0, 0, 0]);
+    setVotes(new Array(activeChoices.length).fill(0));
     setRecentVotes([]);
-  }, []);
+  };
 
   useEffect(() => {
     if (!enabled) return;
@@ -43,24 +57,46 @@ export function useTwitchChat(
     });
 
     const unsubMsg = twitchChat.onMessage((msg) => {
-      setMessages((prev) => [msg, ...prev.slice(0, 29)]);
+      setMessages((prev) => [msg, ...prev.slice(0, 79)]);
       setLastMessageAt(msg.timestamp);
     });
 
     const unsubVote = twitchChat.onVote((vote) => {
-      if (vote.choiceIndex >= 0 && vote.choiceIndex <= 3) {
-        voterMapRef.current.set(vote.voter, vote.choiceIndex);
+      if (vote.choiceIndex >= 0 && vote.choiceIndex < activeChoices.length) {
+        const existingVote = voterMapRef.current.get(vote.voter);
+        const isOverride = !!existingVote && existingVote.choiceIndex !== vote.choiceIndex;
+        const previousChoiceName = isOverride ? existingVote.choiceName : undefined;
+
+        // Set or update current voter's choice
+        voterMapRef.current.set(vote.voter, {
+          choiceIndex: vote.choiceIndex,
+          choiceName: vote.choiceName,
+        });
 
         // Recalculate tally across all unique voters
-        setVotes(() => {
-          const tally = [0, 0, 0, 0];
-          for (const choiceIdx of voterMapRef.current.values()) {
-            if (choiceIdx >= 0 && choiceIdx <= 3) {
-              tally[choiceIdx]++;
-            }
+        const tally = new Array(activeChoices.length).fill(0);
+        for (const item of voterMapRef.current.values()) {
+          if (item.choiceIndex >= 0 && item.choiceIndex < activeChoices.length) {
+            tally[item.choiceIndex]++;
           }
-          return tally;
-        });
+        }
+        setVotes(tally);
+
+        // Annotate recent message in messages state with vote & override details
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.username.toLowerCase() === vote.voter.toLowerCase() && m.message === vote.text
+              ? {
+                  ...m,
+                  voteIndex: vote.choiceIndex,
+                  voteChoiceName: vote.choiceName,
+                  matchedToken: vote.matchedToken,
+                  isOverride,
+                  previousVoteChoiceName: previousChoiceName,
+                }
+              : m
+          )
+        );
 
         // Add to recent vote feed
         setRecentVotes((prev) => [
@@ -68,9 +104,13 @@ export function useTwitchChat(
             voter: vote.voter,
             choiceIndex: vote.choiceIndex,
             choiceName: vote.choiceName,
+            matchedToken: vote.matchedToken,
             timestamp: Date.now(),
+            text: vote.text,
+            isOverride,
+            previousChoiceName,
           },
-          ...prev.slice(0, 5),
+          ...prev.slice(0, 15),
         ]);
       }
     });
@@ -81,13 +121,20 @@ export function useTwitchChat(
       unsubVote();
       twitchChat.disconnect();
     };
-  }, [enabled]);
+  }, [enabled, activeChoices.length]);
 
-  // Calculate vote percentages (0% when no votes exist)
+  // Calculate vote percentages (0% when no votes exist; strictly 100% when 1 option has all votes)
   const totalVotes = votes.reduce((a, b) => a + b, 0);
-  const percentages = votes.map((v) =>
-    totalVotes === 0 ? 0 : Math.round((v / totalVotes) * 100)
-  );
+  let percentages: number[] = new Array(activeChoices.length).fill(0);
+
+  if (totalVotes > 0) {
+    const nonZeroCount = votes.filter((v) => v > 0).length;
+    if (nonZeroCount === 1) {
+      percentages = votes.map((v) => (v > 0 ? 100 : 0));
+    } else {
+      percentages = votes.map((v) => (v === 0 ? 0 : Math.round((v / totalVotes) * 100)));
+    }
+  }
 
   return {
     status,
