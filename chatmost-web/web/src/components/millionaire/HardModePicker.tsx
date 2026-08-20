@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import { type Choice } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -33,16 +33,16 @@ export function HardModePicker({
   const inputRef = useRef<HTMLInputElement>(null);
 
   // If 50:50 is active, narrow to answer + 14 decoys (15 candidates)
-  const candidatePool = useMemo(() => {
+  const candidatePool = (() => {
     if (!isFiftyFiftyActive) return chatters;
     const answer = chatters.find((c) => c.login === answerLogin);
     return answer
       ? [answer, ...fiftyFiftyDecoys].sort((a, b) => (b.messages ?? 0) - (a.messages ?? 0))
       : chatters.slice(0, 15);
-  }, [chatters, answerLogin, isFiftyFiftyActive, fiftyFiftyDecoys]);
+  })();
 
   // Filtered dropdown results
-  const filtered = useMemo(() => {
+  const filtered = (() => {
     const q = query.trim().toLowerCase();
     if (!q) return candidatePool;
     return candidatePool.filter(
@@ -50,12 +50,10 @@ export function HardModePicker({
         c.login.toLowerCase().includes(q) ||
         c.displayName.toLowerCase().includes(q)
     );
-  }, [candidatePool, query]);
+  })();
 
   // Currently selected chatter
-  const selectedChatter = useMemo(() => {
-    return chatters.find((c) => c.login === selectedLogin);
-  }, [chatters, selectedLogin]);
+  const selectedChatter = chatters.find((c) => c.login === selectedLogin);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -140,7 +138,7 @@ export function HardModePicker({
           <Search className="absolute left-3 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
           <Input
             ref={inputRef}
-            placeholder="Type to filter top 200 chatters (e.g. splinteredspike, pronshh)..."
+            placeholder="Type to filter the top 200 chatters..."
             value={query}
             onFocus={() => setIsOpen(true)}
             onChange={(e) => {
@@ -157,6 +155,7 @@ export function HardModePicker({
             {query && !disabled && (
               <button
                 type="button"
+                aria-label="Clear chatter selection"
                 onClick={clearSelection}
                 className="p-1 text-muted-foreground hover:text-foreground"
               >
@@ -165,6 +164,7 @@ export function HardModePicker({
             )}
             <button
               type="button"
+              aria-label={isOpen ? "Close chatter options" : "Open chatter options"}
               disabled={disabled}
               onClick={() => setIsOpen((prev) => !prev)}
               className="p-1.5 border border-border bg-muted/40 text-muted-foreground hover:text-foreground hover:bg-muted"
