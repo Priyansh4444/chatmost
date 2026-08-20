@@ -253,7 +253,7 @@ describe("archive builder marks only complete zonian days as ingested", () => {
         }
         // 08-20 succeeds, 08-19 keeps rate-limiting.
         if (url.includes("2026/08/20")) {
-          return new Response(JSON.stringify({ messages: [{ text: "hello hello emote_time", username: "viewer", timestamp: "2026-08-20T00:00:00.000Z" }] }), { status: 200 });
+          return new Response(JSON.stringify({ messages: [{ text: "hello emote_time", username: "viewer", timestamp: "2026-08-20T00:00:00.000Z" }] }), { status: 200 });
         }
         return new Response("rate limited", { status: 429 });
       })
