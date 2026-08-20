@@ -1,0 +1,16 @@
+node_modules/
+**/node_modules/
+.wrangler/
+**/.wrangler/
+dist/
+**/dist/
+.env
+.env.*
+*.local
+*.log
+.DS_Store
+__pycache__/
+
+# Rust build artifacts
+chatmost/target/
+**/target/
