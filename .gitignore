@@ -14,3 +14,8 @@ __pycache__/
 # Rust build artifacts
 chatmost/target/
 **/target/
+
+# Local databases & datasets
+**/*.db
+**/*.sqlite
+chatmost-web/web/src/data/
