@@ -5,7 +5,11 @@ export interface TwitchChatMessage {
   color: string;
   message: string;
   timestamp: number;
-  voteIndex?: number; // 0, 1, 2, 3 if recognized as option vote
+  voteIndex?: number;
+  voteChoiceName?: string;
+  matchedToken?: string;
+  isOverride?: boolean;
+  previousVoteChoiceName?: string;
 }
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected" | "error";
@@ -15,19 +19,185 @@ export interface ActiveChoice {
   displayName: string;
 }
 
-export class TwitchChatClient {
+export interface VoteExtractionResult {
+  index: number;
+  name: string;
+  matchedToken: string;
+}
+
+/**
+ * Break a name / login into clean sub-tokens for flexible nickname/alias matching.
+ * e.g.:
+ * - ExampleViewer -> ["exampleviewer", "example", "viewer"]
+ * - chat_member -> ["chat_member", "chatmember", "chat", "member"]
+ * - viewer123 -> ["viewer123", "viewer"]
+ */
+export function getChoiceSubTokens(choice: ActiveChoice): string[] {
+  const rawLogin = choice.login.toLowerCase().trim();
+  const rawDisplay = choice.displayName.toLowerCase().trim();
+
+  const tokens = new Set<string>();
+  tokens.add(rawLogin);
+  tokens.add(rawDisplay);
+  tokens.add(rawLogin.replace(/[^a-z0-9]/g, ""));
+  tokens.add(rawDisplay.replace(/[^a-z0-9]/g, ""));
+
+  // Split on underscores, hyphens, and whitespace
+  for (const part of choice.displayName.split(/[\s_-]+/)) {
+    const clean = part.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (clean.length >= 3) tokens.add(clean);
+  }
+
+  // Split on camelCase boundaries (e.g. EvilBuddha -> Evil, Buddha)
+  const camelParts = choice.displayName.replace(/([a-z])([A-Z])/g, "$1 $2").split(/\s+/);
+  for (const part of camelParts) {
+    const clean = part.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (clean.length >= 3) tokens.add(clean);
+  }
+
+  // Strip trailing numbers (e.g. viewer123 -> viewer)
+  const withoutTrailingDigits = rawLogin.replace(/\d+$/, "");
+  if (withoutTrailingDigits.length >= 3) {
+    tokens.add(withoutTrailingDigits);
+  }
+
+  return Array.from(tokens).filter((t) => t.length >= 2);
+}
+
+/**
+ * Robust Twitch Vote Parser supporting option numbers, letters, higher/lower keywords,
+ * exact chatter/emote names, and sub-word / nickname aliases.
+ */
+export function parseTwitchVote(
+  msg: string,
+  activeChoices: ActiveChoice[] = []
+): VoteExtractionResult | null {
+  if (!msg || !msg.trim() || activeChoices.length === 0) return null;
+
+  const rawClean = msg.trim().toLowerCase();
+  const isHigherLowerMode =
+    activeChoices.length === 2 &&
+    (activeChoices[0].login.toLowerCase() === "higher" || activeChoices[0].displayName.toLowerCase() === "higher") &&
+    (activeChoices[1].login.toLowerCase() === "lower" || activeChoices[1].displayName.toLowerCase() === "lower");
+
+  // 1. Direct Option Identifiers (1-4, A-D, !1-!4, !a-!d, #1-#4)
+  const exactOptionMap: Record<string, number> = {
+    "1": 0, "a": 0, "!1": 0, "!a": 0, "#1": 0, "option 1": 0, "option a": 0, "vote 1": 0, "vote a": 0,
+    "2": 1, "b": 1, "!2": 1, "!b": 1, "#2": 1, "option 2": 1, "option b": 1, "vote 2": 1, "vote b": 1,
+    "3": 2, "c": 2, "!3": 2, "!c": 2, "#3": 2, "option 3": 2, "option c": 2, "vote 3": 2, "vote c": 2,
+    "4": 3, "d": 3, "!4": 3, "!d": 3, "#4": 3, "option 4": 3, "option d": 3, "vote 4": 3, "vote d": 3,
+  };
+
+  if (rawClean in exactOptionMap) {
+    const idx = exactOptionMap[rawClean];
+    if (activeChoices[idx]) {
+      return { index: idx, name: activeChoices[idx].displayName, matchedToken: rawClean };
+    }
+  }
+
+  // 2. Higher / Lower Keyword Matching (for Higher or Lower game mode).
+  // Single letters ("h", "s", "l", "w", "+", "-") are deliberately NOT
+  // keywords: they collide with single-letter emote spam ("s", "o", ...)
+  // that would otherwise cast false votes.
+  if (isHigherLowerMode) {
+    const higherKeywords = new Set(["higher", "high", "up", "higer", "more", "above", "over", "top", "big", "bigger"]);
+    const lowerKeywords = new Set(["lower", "low", "down", "fewer", "less", "below", "under", "bot", "bottom", "small", "smaller"]);
+    const negationTokens = new Set(["not", "no", "never", "n't", "aint", "isnt", "arent", "dont", "didnt"]);
+
+    const words = rawClean.replace(/[^a-z0-9+-]/g, " ").split(/\s+/).filter(Boolean);
+    let negated = false;
+    for (const w of words) {
+      if (negationTokens.has(w)) {
+        negated = true;
+        continue;
+      }
+      if (higherKeywords.has(w)) {
+        return { index: negated ? 1 : 0, name: activeChoices[negated ? 1 : 0].displayName, matchedToken: w };
+      }
+      if (lowerKeywords.has(w)) {
+        return { index: negated ? 0 : 1, name: activeChoices[negated ? 0 : 1].displayName, matchedToken: w };
+      }
+      // Any intervening word cancels the negation (e.g. "no" as filler,
+      // "not sure but higher", ...) so only adjacent "not <keyword>" flips.
+      negated = false;
+    }
+  }
+
+  // 3. Choice Name, Sub-token, and Alias Matching
+  // Clean message into tokens stripping punctuation
+  const sanitized = rawClean.replace(/[@!#?.,;:"'()[\]{}]/g, " ");
+  const msgTokens = sanitized.split(/\s+/).filter(Boolean);
+
+  // Pre-calculate sub-tokens for each active choice
+  const choiceSubTokens = activeChoices.map((choice) => ({
+    choice,
+    subTokens: getChoiceSubTokens(choice),
+  }));
+
+  // A. Check for exact full message matches
+  for (const [i, { choice, subTokens }] of choiceSubTokens.entries()) {
+    const loginClean = choice.login.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const displayClean = choice.displayName.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const msgClean = rawClean.replace(/[^a-z0-9]/g, "");
+
+    if (msgClean === loginClean || msgClean === displayClean) {
+      return { index: i, name: choice.displayName, matchedToken: rawClean };
+    }
+
+    if (subTokens.some((st) => st === rawClean)) {
+      return { index: i, name: choice.displayName, matchedToken: rawClean };
+    }
+  }
+
+  // B. Check word-by-word against sub-tokens (e.g. "i think buddha is top" -> matches "buddha" -> EvilBuddha)
+  for (const word of msgTokens) {
+    if (word.length < 2) continue;
+
+    // Check if word is option digit or letter (e.g. "I pick 1" or "vote a")
+    if (word in exactOptionMap) {
+      const idx = exactOptionMap[word];
+      if (activeChoices[idx]) {
+        return { index: idx, name: activeChoices[idx].displayName, matchedToken: word };
+      }
+    }
+
+    // Match word against choice sub-tokens
+    for (const [i, { choice, subTokens }] of choiceSubTokens.entries()) {
+      if (subTokens.includes(word)) {
+        return { index: i, name: choice.displayName, matchedToken: word };
+      }
+    }
+  }
+
+  // C. Substring matching for distinctive stems (>= 3 chars)
+  for (const word of msgTokens) {
+    if (word.length < 3) continue;
+
+    for (const [i, { choice, subTokens }] of choiceSubTokens.entries()) {
+      for (const st of subTokens) {
+        if (st.length >= 3 && (st.includes(word) || word.includes(st))) {
+          return { index: i, name: choice.displayName, matchedToken: word };
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+class TwitchChatClient {
   private ws: WebSocket | null = null;
   private channel: string;
   private status: ConnectionStatus = "disconnected";
   private messageListeners: ((msg: TwitchChatMessage) => void)[] = [];
   private statusListeners: ((status: ConnectionStatus) => void)[] = [];
-  private voteListeners: ((vote: { voter: string; choiceIndex: number; choiceName: string; text: string }) => void)[] = [];
+  private voteListeners: ((vote: { voter: string; choiceIndex: number; choiceName: string; matchedToken: string; text: string }) => void)[] = [];
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   private activeChoices: ActiveChoice[] = [];
   private intentionalDisconnect = false;
   private _lastMessageAt: number | null = null;
 
-  constructor(channel = "jo2uke") {
+  constructor(channel = "") {
     this.channel = channel.toLowerCase().replace(/^#/, "");
   }
 
@@ -182,7 +352,7 @@ export class TwitchChatClient {
     }
 
     // Check vote extraction
-    const voteResult = this.extractVoteIndex(message);
+    const voteResult = parseTwitchVote(message, this.activeChoices);
 
     const chatMsg: TwitchChatMessage = {
       id: Math.random().toString(36).slice(2),
@@ -191,65 +361,25 @@ export class TwitchChatClient {
       color: color || "#a855f7",
       message,
       timestamp: Date.now(),
-      voteIndex: voteResult !== null ? voteResult.index : undefined,
+      voteIndex: voteResult ? voteResult.index : undefined,
+      voteChoiceName: voteResult ? voteResult.name : undefined,
+      matchedToken: voteResult ? voteResult.matchedToken : undefined,
     };
 
     this._lastMessageAt = Date.now();
     this.messageListeners.forEach((l) => l(chatMsg));
 
-    if (voteResult !== null) {
+    if (voteResult) {
       this.voteListeners.forEach((l) =>
         l({
           voter: username,
           choiceIndex: voteResult.index,
           choiceName: voteResult.name,
+          matchedToken: voteResult.matchedToken,
           text: message,
         })
       );
     }
-  }
-
-  private extractVoteIndex(msg: string): { index: number; name: string } | null {
-    const clean = msg.trim().toLowerCase();
-    if (!clean) return null;
-
-    // 1. Single option identifier (1, 2, 3, 4, A, B, C, D, !1, !a, etc.)
-    if (["1", "a", "!1", "!a", "vote 1", "vote a", "!vote 1", "!vote a"].includes(clean)) {
-      if (this.activeChoices[0]) return { index: 0, name: this.activeChoices[0].displayName };
-    }
-    if (["2", "b", "!2", "!b", "vote 2", "vote b", "!vote 2", "!vote b"].includes(clean)) {
-      if (this.activeChoices[1]) return { index: 1, name: this.activeChoices[1].displayName };
-    }
-    if (["3", "c", "!3", "!c", "vote 3", "vote c", "!vote 3", "!vote c"].includes(clean)) {
-      if (this.activeChoices[2]) return { index: 2, name: this.activeChoices[2].displayName };
-    }
-    if (["4", "d", "!4", "!d", "vote 4", "vote d", "!vote 4", "!vote d"].includes(clean)) {
-      if (this.activeChoices[3]) return { index: 3, name: this.activeChoices[3].displayName };
-    }
-
-    // 2. Chatter name typed in chat (e.g. "splinteredspike", "@splinteredspike", "vote splinteredspike")
-    if (this.activeChoices.length > 0) {
-      // Split message into words / tokens
-      const sanitized = clean.replace(/[@!#]/g, " ");
-      const words = sanitized.split(/\s+/).filter(Boolean);
-
-      for (let i = 0; i < this.activeChoices.length; i++) {
-        const choice = this.activeChoices[i];
-        const loginLower = choice.login.toLowerCase();
-        const displayLower = choice.displayName.toLowerCase();
-
-        // Exact match or word token match
-        if (clean === loginLower || clean === displayLower) {
-          return { index: i, name: choice.displayName };
-        }
-
-        if (words.some((w) => w === loginLower || w === displayLower)) {
-          return { index: i, name: choice.displayName };
-        }
-      }
-    }
-
-    return null;
   }
 
   public onMessage(fn: (msg: TwitchChatMessage) => void) {
@@ -259,7 +389,7 @@ export class TwitchChatClient {
     };
   }
 
-  public onVote(fn: (vote: { voter: string; choiceIndex: number; choiceName: string; text: string }) => void) {
+  public onVote(fn: (vote: { voter: string; choiceIndex: number; choiceName: string; matchedToken: string; text: string }) => void) {
     this.voteListeners.push(fn);
     return () => {
       this.voteListeners = this.voteListeners.filter((l) => l !== fn);
@@ -275,4 +405,4 @@ export class TwitchChatClient {
 }
 
 // Global shared singleton
-export const twitchChat = new TwitchChatClient("jo2uke");
+export const twitchChat = new TwitchChatClient("");
