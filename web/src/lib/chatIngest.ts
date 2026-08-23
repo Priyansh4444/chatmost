@@ -18,9 +18,7 @@
  */
 
 import {
-  PRIZE_TIERS,
   type TopTarget,
-  type Question,
   type LeaderboardEntry,
   type FeudCategory,
   type LongestMessage,
@@ -34,6 +32,13 @@ import { fetchEmoteSets } from "./emoteSets";
 import { Data, Effect } from "effect";
 import { fetchWithRetryEffect } from "./effectHttp";
 
+export interface IngestLiveStats {
+  messages: number;
+  chatters: number;
+  emotes: number;
+  words: number;
+}
+
 export interface IngestProgress {
   status: "idle" | "ingesting" | "done" | "error";
   stage: string;
@@ -41,6 +46,8 @@ export interface IngestProgress {
   total: number;
   detail: string;
   error?: string;
+  /** Secondary live stats shown beside the progress bar — never moves it. */
+  live?: IngestLiveStats;
 }
 
 export interface CachedArchive {
@@ -92,7 +99,7 @@ import { isBot, STOP_WORDS } from "./utils";
 // ingestion. From v11 on, only fully-fetched days/VODs are marked ingested
 // and leftover partial days are retried until they clear, so cached archives
 // are trustworthy and future bumps can migrate.
-const ARCHIVE_CACHE_VERSION = "v11";
+const ARCHIVE_CACHE_VERSION = "v12";
 const LEGACY_ARCHIVE_CACHE_VERSIONS: string[] = [];
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -131,7 +138,7 @@ function fetchWithRetry(url: string, options: RequestInit, isCancelled: () => bo
 export { fetchWithRetry };
 
 
-interface RawMessage {
+export interface RawMessage {
   login: string;
   displayName: string;
   text: string;
@@ -141,7 +148,7 @@ interface RawMessage {
   twitchSpans?: { start: number; end: number; id: string; name: string }[];
 }
 
-interface EmoteMatcher {
+export interface EmoteMatcher {
   regex: RegExp;
   kind: "7tv" | "twitch";
   kindLabel: string;
@@ -480,7 +487,7 @@ async function fetchVodChat(
 // Zonian daily logs
 // ---------------------------------------------------------------------------
 
-interface ZonianDay {
+export interface ZonianDay {
   year: string;
   month: string;
   day: string;
@@ -531,7 +538,7 @@ async function zonianFetchPage(path: string, isCancelled: () => boolean): Promis
   throw lastError instanceof Error ? lastError : new Error(`zonian fetch failed: ${path}`);
 }
 
-async function zonianListDays(channel: string, isCancelled: () => boolean): Promise<ZonianDay[]> {
+export async function zonianListDays(channel: string, isCancelled: () => boolean): Promise<ZonianDay[]> {
   try {
     const response = await zonianFetchPage(`/list?channel=${channel}`, isCancelled);
     if (!response.ok) return [];
@@ -747,7 +754,7 @@ export function isEmoteSpam(words: string[]): boolean {
   return false;
 }
 
-interface Aggregate {
+export interface Aggregate {
   targets: Map<string, TargetAcc>;
   chatters: Map<string, ChatterAcc>;
   totalMessages: number;
@@ -756,8 +763,19 @@ interface Aggregate {
   maxDate: string;
 }
 
-function createAggregate(): Aggregate {
+export function createAggregate(): Aggregate {
   return { targets: new Map(), chatters: new Map(), totalMessages: 0, longest: [], minDate: "", maxDate: "" };
+}
+
+/** Cheap live counters for the ingest overlay's secondary stats line. */
+function computeLiveStats(agg: Aggregate): IngestLiveStats {
+  let emotes = 0;
+  let words = 0;
+  for (const t of agg.targets.values()) {
+    if (t.kind === "7tv" || t.kind === "twitch") emotes += 1;
+    else if (t.kind === "word") words += 1;
+  }
+  return { messages: agg.totalMessages, chatters: agg.chatters.size, emotes, words };
 }
 
 function touchDate(agg: Aggregate, date: string) {
@@ -765,7 +783,7 @@ function touchDate(agg: Aggregate, date: string) {
   if (!agg.maxDate || date > agg.maxDate) agg.maxDate = date;
 }
 
-function ingestMessage(agg: Aggregate, msg: RawMessage, matchers: EmoteMatcher[]) {
+export function ingestMessage(agg: Aggregate, msg: RawMessage, matchers: EmoteMatcher[]) {
   const login = msg.login.toLowerCase().trim();
   if (!login || !msg.text.trim() || isBot(login)) return;
   if (msg.text.trim().startsWith("!")) return;
@@ -951,7 +969,7 @@ export function deserializeAggregate(serialized: SerializedAggregate): Aggregate
 // Archive builder
 // ---------------------------------------------------------------------------
 
-function buildArchive(channel: string, agg: Aggregate, meta: { twitchId: string; avatarUrl?: string; seData: DynamicStreamerData }): DynamicStreamerData {
+export function buildArchive(channel: string, agg: Aggregate, meta: { twitchId: string; avatarUrl?: string; seData: DynamicStreamerData }): DynamicStreamerData {
   const chattersSorted = [...agg.chatters.values()]
     .filter((c) => !isBot(c.login))
     .sort((a, b) => b.messages - a.messages);
@@ -1139,61 +1157,6 @@ function buildArchive(channel: string, agg: Aggregate, meta: { twitchId: string;
     });
   }
 
-  const questions: Question[] = [];
-  if (chatters.length >= 4) {
-    // Trivia word targets must be substantial words (>= 5 chars, non-stopwords)
-    const targetPool = targets.filter(
-      (t) =>
-        !(t.kind === "word" && (t.name.length < 5 || STOP_WORDS.has(t.name.toLowerCase()))) &&
-        (leaderboards[`${t.kind}:${t.name}`]?.length ?? 0) >= 6
-    );
-    const usedTargets = new Set<string>();
-    for (let tier = 1; tier <= 15; tier++) {
-      let target: TopTarget | undefined;
-      for (let i = 0; i < targetPool.length && !target; i++) {
-        const candidate = targetPool[(tier * 7 + i * 13) % targetPool.length];
-        const key = `${candidate.kind}:${candidate.name}`;
-        if (!usedTargets.has(key)) {
-          target = candidate;
-          usedTargets.add(key);
-        }
-      }
-      if (!target) break;
-      const lb = (leaderboards[`${target.kind}:${target.name}`] ?? []).filter((e) => !isBot(e.login));
-      const answer = lb[0] ?? chatters[0];
-      if (!answer || isBot(answer.login)) continue;
-      const decoys: Choice[] = [];
-      const used = new Set([answer.login]);
-      for (const e of lb.slice(1)) {
-        if (decoys.length >= 3) break;
-        if (used.has(e.login) || isBot(e.login)) continue;
-        used.add(e.login);
-        decoys.push({ login: e.login, displayName: e.displayName });
-      }
-      for (const c of chatters) {
-        if (decoys.length >= 3) break;
-        if (used.has(c.login) || isBot(c.login)) continue;
-        used.add(c.login);
-        decoys.push({ login: c.login, displayName: c.displayName });
-      }
-      if (decoys.length < 3) break;
-      questions.push({
-        tier,
-        prize: PRIZE_TIERS[Math.min(tier, 15) - 1]?.prize ?? "",
-        target: {
-          kind: target.kind,
-          kindLabel: target.kindLabel,
-          name: target.name,
-          url: target.url,
-          totalUses: target.total,
-        },
-        answer,
-        choices: [answer, ...decoys].sort(() => Math.random() - 0.5),
-        leaderboard: lb.slice(0, 10),
-      });
-    }
-  }
-
   const higherLowerItems: HigherLowerItem[] = targets.slice(0, 100).map((t, idx) => ({
     id: `${t.name}-${idx}`,
     name: t.name,
@@ -1225,7 +1188,7 @@ function buildArchive(channel: string, agg: Aggregate, meta: { twitchId: string;
     avatarUrl: meta.avatarUrl,
     emotesCount: emoteTargets.length,
     targets,
-    questions,
+    questions: [],
     higherLowerItems,
     chatters,
     feudCategories,
@@ -1262,16 +1225,41 @@ export async function buildChatArchive(
   let source: "zonian" | "vods" = "vods";
   let videos = 0;
   let days = 0;
-  let messageCount = 0;
   const completedDays: string[] = [];
   const partialDayOffsets: Record<string, number> = {};
   const dayOffsets: Record<string, number> = {};
   const ingestedVodIds: string[] = [];
 
-  const handleBatch = (msgs: RawMessage[]) => {
+  // The loader's main line stays locked to the current fetch stage; batch
+  // updates only tick the secondary live stats (messages/chatters/emotes) so
+  // the progress bar and stage never flap between "Fetching…" and
+  // "Analyzing messages" mid-day. Counters are shared across the concurrent
+  // day fetchers so the reported progress is monotonic and consistent.
+  let fetchStage = "Analyzing messages";
+  let fetchCurrent = 0;
+  let fetchTotal = 0;
+  let fetchDetail = "";
+  let daysStarted = 0;
+  let daysCompleted = 0;
+
+  const emitProgress = (stage: string, current: number, total: number, detail: string) => {
+    fetchStage = stage;
+    fetchCurrent = current;
+    fetchTotal = total;
+    fetchDetail = detail;
+    onProgress({ status: "ingesting", stage, current, total, detail, live: computeLiveStats(agg) });
+  };
+
+  const handleBatch = () => {
     if (isCancelled()) return;
-    messageCount += msgs.length;
-    onProgress({ status: "ingesting", stage: "Analyzing messages", current: messageCount, total: 0, detail: `${messageCount.toLocaleString()} messages parsed` });
+    onProgress({
+      status: "ingesting",
+      stage: fetchStage,
+      current: fetchCurrent,
+      total: fetchTotal,
+      detail: fetchDetail,
+      live: computeLiveStats(agg),
+    });
   };
 
   const emoteSets = await fetchEmoteSets(seData.twitchId, isCancelled);
@@ -1283,18 +1271,18 @@ export async function buildChatArchive(
     source = "zonian";
     days = zonianDays.length;
 
-    const fetchDay = async (day: ZonianDay, i: number) => {
+    const fetchDay = async (day: ZonianDay) => {
       if (isCancelled()) return;
-      onProgress({
-        status: "ingesting",
-        stage: `Fetching ${channel} chat logs (zonian)`,
-        current: i,
-        total: zonianDays.length,
-        detail: `Day ${i + 1}/${zonianDays.length} · ${day.year}-${day.month}-${day.day} (${agg.totalMessages.toLocaleString()} msgs)`,
-      });
+      daysStarted += 1;
+      emitProgress(
+        `Fetching ${channel} chat logs (zonian)`,
+        daysCompleted,
+        zonianDays.length,
+        `Day ${daysStarted}/${zonianDays.length} · ${day.year}-${day.month}-${day.day} (${agg.totalMessages.toLocaleString()} msgs)`
+      );
       const result = await zonianFetchDay(channel, day, isCancelled, (batch) => {
         for (const msg of batch) ingestMessage(agg, msg, matchers);
-        handleBatch(batch);
+        handleBatch();
       });
       const key = `${day.year}-${day.month}-${day.day}`;
       // Track how many messages were ingested for this day (the resume offset)
@@ -1305,6 +1293,7 @@ export async function buildChatArchive(
       // incremental sync finishes it instead of silently losing its messages.
       if (result.complete) {
         completedDays.push(key);
+        daysCompleted += 1;
         delete partialDayOffsets[key];
       } else {
         partialDayOffsets[key] = result.nextOffset;
@@ -1331,17 +1320,16 @@ export async function buildChatArchive(
       if (isCancelled()) break;
       const vod = vods[i];
       const hours = (vod.lengthSeconds / 3600).toFixed(1);
-      onProgress({
-        status: "ingesting",
-        stage: "Fetching VOD chat (Twitch)",
-        current: i,
-        total: vods.length,
-        detail: `VOD ${i + 1}/${vods.length} · ${hours}h · ${vod.title.slice(0, 30)} (${agg.totalMessages.toLocaleString()} msgs)`,
-      });
+      emitProgress(
+        "Fetching VOD chat (Twitch)",
+        i,
+        vods.length,
+        `VOD ${i + 1}/${vods.length} · ${hours}h · ${vod.title.slice(0, 30)} (${agg.totalMessages.toLocaleString()} msgs)`
+      );
       try {
         await fetchVodChat(vod, isCancelled, (batch) => {
           for (const msg of batch) ingestMessage(agg, msg, matchers);
-          handleBatch(batch);
+          handleBatch();
         });
         ingestedVodIds.push(vod.id);
       } catch {
@@ -1357,7 +1345,7 @@ export async function buildChatArchive(
   if (isCancelled()) throw new Error("cancelled");
   if (agg.totalMessages === 0) throw new Error("No chat messages could be fetched for this channel.");
 
-  onProgress({ status: "ingesting", stage: "Building archive", current: 1, total: 1, detail: "Compiling leaderboards, profiles, trivia…" });
+  onProgress({ status: "ingesting", stage: "Building archive", current: 1, total: 1, detail: "Compiling leaderboards, profiles, trivia…", live: computeLiveStats(agg) });
   const data = buildArchive(channel, agg, { twitchId: seData.twitchId, avatarUrl: seData.avatarUrl, seData });
 
   return {

@@ -106,7 +106,7 @@ describe("StreamElements fallback never leaks into game surfaces", () => {
     expect(api.allTargets(data)).toEqual([]);
     expect(api.longestMessages(10, data)).toEqual([]);
     expect(api.feudCategories(data)).toEqual([]);
-    expect(() => api.question(1, [], [], data)).toThrow(/live chatter data/);
+    expect(() => api.question(data)).toThrow(/live chatter data/);
   });
 
   it("still filters bot accounts out of the SE-only chatter list", async () => {

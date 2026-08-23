@@ -2,7 +2,41 @@ import { createContext, useContext, useState, useEffect, useRef, type ReactNode 
 import { useQuery } from "@tanstack/react-query";
 import type { DynamicStreamerData } from "./dynamicStreamer";
 import { loadDynamicStreamerData, clearStreamerMemoryCache } from "./dynamicStreamer";
-import { archiveCacheGet, archiveCacheSet, buildChatArchive, clearArchiveCache, incrementalArchiveUpdate, isUsableArchive, type IngestProgress } from "./chatIngest";
+import { archiveCacheGet, archiveCacheSet, buildChatArchive, clearArchiveCache, incrementalArchiveUpdate, isUsableArchive, type CachedArchive, type IngestProgress } from "./chatIngest";
+
+/** Channels whose deep archive is served (and cached) from the server route
+ * `/api/archive?channel=…` instead of being built client-side in IndexedDB. */
+const SERVER_ARCHIVE_CHANNELS = new Set<string>();
+
+/**
+ * Load a channel's archive from the server-side cache route. Throws when the
+ * server has no cache yet, so callers fall back to the normal client build.
+ */
+async function loadServerArchive(channel: string): Promise<DynamicStreamerData> {
+  let res: Response;
+  try {
+    res = await fetch(`/api/archive?channel=${encodeURIComponent(channel)}`);
+  } catch {
+    throw new Error("Server archive route unreachable.");
+  }
+  if (res.status !== 200) {
+    throw new Error(`Server has no cached archive for #${channel} (${res.status}).`);
+  }
+  const buf = await res.arrayBuffer();
+  // The server serves the archive gzipped, but Cloudflare's edge strips the
+  // Content-Encoding header on worker responses — decompress explicitly when
+  // the gzip magic bytes are present.
+  const bytes = new Uint8Array(buf);
+  const isGzip = bytes.byteLength >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
+  const text = isGzip
+    ? await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).text()
+    : new TextDecoder().decode(buf);
+  const archive = JSON.parse(text) as CachedArchive;
+  if (archive?.data && archive.data.channel === channel && isUsableArchive(archive)) {
+    return archive.data;
+  }
+  throw new Error("Server returned an unusable archive.");
+}
 
 interface StreamerInfo {
   channel: string;
@@ -37,7 +71,7 @@ const ARCHIVE_TTL_MS = 6 * 60 * 60 * 1000;
  * full page reload is the only thing that triggers a refetch.
  */
 function useDynamicStreamerData(channel: string) {
-  return useQuery<DynamicStreamerData | null>({
+  return useQuery<DynamicStreamerData | null>(({
     queryKey: ["dynamicStreamer", channel],
     queryFn: () => loadDynamicStreamerData(channel),
     staleTime: Infinity,
@@ -45,7 +79,7 @@ function useDynamicStreamerData(channel: string) {
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     refetchOnMount: false,
-  });
+  }));
 }
 
 const StreamerContext = createContext<StreamerContextValue | null>(null);
@@ -95,6 +129,22 @@ export function StreamerProvider({ children }: { children: ReactNode }) {
     const runId = ++runIdRef.current;
 
     const run = async () => {
+      // Server-cached channels: fetch the archive from the API route and never
+      // build it in the browser. Fall back to the normal client flow if the
+      // server route can't produce an archive.
+      if (SERVER_ARCHIVE_CHANNELS.has(channel)) {
+        try {
+          const data = await loadServerArchive(channel);
+          if (runIdRef.current !== runId) return;
+          setArchiveData(data);
+          setIngestProgress({ status: "done", stage: "Archive ready", current: 0, total: 0, detail: "Cached server-side" });
+          return;
+        } catch (err) {
+          if (runIdRef.current !== runId) return;
+          console.warn(`Server archive for #${channel} unavailable; using client-side build.`, err);
+        }
+      }
+
       const cached = await archiveCacheGet(channel);
       if (runIdRef.current !== runId) return;
 

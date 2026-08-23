@@ -2,10 +2,17 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "chatmost-live",
   "compatibility_date": "2026-01-01",
+  "main": "web/worker.ts",
   "assets": {
     "directory": "./web/dist",
     "not_found_handling": "single-page-application"
   },
+  "kv_namespaces": [
+    {
+      "binding": "ARCHIVES",
+      "id": "d06b91fcfd274e898273e866098e872c"
+    }
+  ],
   "observability": {
     "enabled": true
   }

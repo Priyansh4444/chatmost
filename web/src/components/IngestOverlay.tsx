@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useStreamer } from "@/lib/streamerContext";
+import { formatNumber } from "@/lib/utils";
 
 function formatEta(seconds: number): string {
   if (seconds < 60) return `≈ ${Math.max(1, Math.round(seconds))}s left`;
@@ -132,6 +133,23 @@ export function IngestOverlay() {
             ? " · estimating…"
             : ""}
         </p>
+
+        {/* Secondary live stats — informational only, never moves the bar */}
+        {ingestProgress.live && (
+          <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-[10px] text-zinc-600 tabular-nums">
+            <span>{formatNumber(ingestProgress.live.messages)} messages parsed</span>
+            <span>·</span>
+            <span>{formatNumber(ingestProgress.live.chatters)} chatters</span>
+            <span>·</span>
+            <span>{formatNumber(ingestProgress.live.emotes)} emotes</span>
+            {ingestProgress.live.words > 0 && (
+              <>
+                <span>·</span>
+                <span>{formatNumber(ingestProgress.live.words)} words</span>
+              </>
+            )}
+          </p>
+        )}
       </div>
     </div>
   );

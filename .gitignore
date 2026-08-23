@@ -1,9 +1,7 @@
 node_modules/
-**/node_modules/
-.wrangler/
-**/.wrangler/
+web/dist/
 dist/
-**/dist/
+.wrangler/
 .env
 .env.*
 *.local
@@ -11,17 +9,16 @@ dist/
 .DS_Store
 __pycache__/
 
-# Rust build artifacts
-chatmost/target/
-**/target/
+# Test outputs
+.profile/
+web/e2e/.profile/
+playwright-report/
+test-results/
 
-# Local databases & datasets
-**/*.db
-**/*.sqlite
-chatmost-web/web/src/data/
-
-# Playwright e2e artifacts (real channel archives are sensitive — never commit)
-chatmost-web/web/e2e/fixtures/
-chatmost-web/web/e2e/.profile/
-chatmost-web/web/e2e/test-results/
-chatmost-web/web/playwright-report/
+# Legacy / local workspace
+/target/
+Cargo.lock
+Cargo.toml
+smash-chat-web/
+word-moments/
+**/*.rs.bk

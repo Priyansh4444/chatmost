@@ -170,6 +170,56 @@ function shuffle<T>(arr: readonly T[]): T[] {
   return a;
 }
 
+function liveQuestion(
+  dynamic: DynamicStreamerData,
+  scope: "emotes" | "words"
+): Question | null {
+  const chatters = (dynamic.chatters ?? []).filter((c) => !isBot(c.login));
+  const isEmote = (t: TopTarget) => t.kind === "7tv" || t.kind === "twitch";
+  const isWord = (t: TopTarget) =>
+    t.kind === "word" && t.name.length >= 5 && !STOP_WORDS.has(t.name.toLowerCase());
+  const pool = shuffle((dynamic.targets ?? []).filter((t) => (scope === "words" ? isWord(t) : isEmote(t))));
+  for (const t of pool) {
+    const lb = (dynamic.leaderboards?.[`${t.kind}:${t.name}`] ?? []).filter((e) => !isBot(e.login));
+    const users = new Set(lb.map((e) => e.login));
+    // Skip one-off spam / private emotes: at least 3 real chatters must have used it.
+    if (users.size < 3) continue;
+    const answer = lb[0];
+    if (!answer) continue;
+    const used = new Set([answer.login]);
+    const decoys: Choice[] = [];
+    for (const entry of lb.slice(1)) {
+      if (decoys.length >= 3) break;
+      if (used.has(entry.login)) continue;
+      used.add(entry.login);
+      decoys.push({ login: entry.login, displayName: entry.displayName });
+    }
+    for (const chatter of chatters) {
+      if (decoys.length >= 3) break;
+      if (used.has(chatter.login)) continue;
+      used.add(chatter.login);
+      decoys.push({ login: chatter.login, displayName: chatter.displayName });
+    }
+    if (decoys.length < 3) continue;
+    const choices = shuffle([{ login: answer.login, displayName: answer.displayName }, ...decoys]);
+    return {
+      tier: 1,
+      prize: "",
+      target: {
+        kind: t.kind,
+        kindLabel: t.kindLabel,
+        name: t.name,
+        url: t.url,
+        totalUses: t.total,
+      },
+      answer: { login: answer.login, displayName: answer.displayName },
+      choices,
+      leaderboard: lb.slice(0, 10),
+    };
+  }
+  return null;
+}
+
 // Active dynamic streamer data is provided by callers (from the react-query
 // `useDynamicStreamerData` hook) and threaded through each accessor.
 
@@ -195,62 +245,14 @@ export const api = {
     return [];
   },
 
-  // Generate a Question from the channel's pre-built trivia set (excluding
-  // bots and short/stop words). By default the pool is emotes ONLY (7TV +
-  // Twitch/BTTV/FFZ) — words never show up in a trivia run. Passing scope
-  // "words" opts into word targets (7+ chars preferred, 5+ as a sparse-channel
-  // fallback). Everything is filtered client-side from already-loaded data, so
-  // no reload is needed.
+  // Build a trivia question on the fly from the live archive (targets +
+  // leaderboards + chatters). Emotes by default; pass scope "words" for words.
   question: (
-    tier = 1,
-    excludeNames: string[] = [],
-    excludeAnswerLogins: string[] = [],
     dynamic?: DynamicStreamerData | null,
     scope: "emotes" | "words" = "emotes"
   ): Question => {
-    if (dynamic) {
-      const isEmoteTarget = (qq: Question) => qq.target.kind === "7tv" || qq.target.kind === "twitch";
-      const isWordTarget = (qq: Question) => qq.target.kind === "word";
-      // Word trivia targets must be substantial words — 7+ chars preferred,
-      // 5+ chars as a fallback for sparse channels.
-      const isSubstantialWord = (qq: Question, minLength: number) =>
-        !(qq.target.kind === "word" && (qq.target.name.length < minLength || STOP_WORDS.has(qq.target.name.toLowerCase())));
-      const usable = (qq: Question) => !isBot(qq.answer.login);
-
-      const excludedNames = new Set(excludeNames);
-      const excludedAnswerLogins = new Set(excludeAnswerLogins);
-
-      // Respect targets already asked this run so the target varies; fall back
-      // to the ordered candidates once everything is exhausted.
-      const ordered = (dynamic.questions ?? []).slice(tier - 1).filter(usable);
-      const answerOk = ordered.filter((qq) => !excludedAnswerLogins.has(qq.answer.login));
-      // Emote scope serves ONLY emote questions; word scope serves only
-      // substantial words. Emotes are the default — words are opt-in.
-      const scoped = answerOk.filter((qq) =>
-        scope === "words" ? isWordTarget(qq) && isSubstantialWord(qq, 5) : isEmoteTarget(qq)
-      );
-      const candidates = scoped.filter((qq) => !excludedNames.has(qq.target.name));
-      const base = candidates.length > 0 ? candidates : scoped;
-
-      // Emotes first, then 7+ char words, then 5+ char words. Each group is
-      // shuffled so the random window below opens somewhere fresh on every
-      // run instead of always serving the same first question.
-      const emotes = shuffle(base.filter(isEmoteTarget));
-      const longWords = shuffle(base.filter((qq) => isSubstantialWord(qq, 7)));
-      const shortWords = shuffle(base.filter((qq) => isSubstantialWord(qq, 5) && qq.target.name.length < 7));
-      const prioritized = scope === "words" ? [...longWords, ...shortWords] : emotes;
-
-      // Random draw from the next several prioritized candidates: keeps the
-      // difficulty ramp while adding run-to-run variety. Repeats are allowed.
-      const rawQ = prioritized[Math.min(Math.floor(Math.random() * prioritized.length), 6)];
-      if (rawQ) {
-        return {
-          ...rawQ,
-          choices: shuffle(rawQ.choices.filter((c) => !isBot(c.login))),
-          leaderboard: (rawQ.leaderboard || []).filter((e) => !isBot(e.login)),
-        };
-      }
-    }
+    const picked = dynamic ? liveQuestion(dynamic, scope) : null;
+    if (picked) return picked;
     throw new Error("Not enough live chatter data to build trivia for this channel.");
   },
 

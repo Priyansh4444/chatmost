@@ -1,4 +1,4 @@
-import { useReducer, useRef, useState } from "react";
+import { useReducer, useState } from "react";
 import { api, type Question, type LeaderboardEntry } from "@/lib/api";
 import type { DynamicStreamerData } from "@/lib/dynamicStreamer";
 import { Button } from "@/components/ui/button";
@@ -77,7 +77,7 @@ export function Game() {
         )
       ) : (
         <GameBoard
-          key={streamerChannel}
+          key={`${streamerChannel}:${dynamicData?.targets?.length ?? 0}:${dynamicData?.loadedAt ?? 0}`}
           channel={streamerChannel}
           dynamicData={dynamicData}
           setChannel={setStreamerChannel}
@@ -102,7 +102,7 @@ function GameBoard({
     let firstQuestion: Question | null = null;
     let firstError: string | null = null;
     try {
-      firstQuestion = api.question(1, [], [], dynamicData);
+      firstQuestion = api.question(dynamicData);
     } catch (err) {
       firstError = err instanceof Error ? err.message : String(err);
     }
@@ -119,18 +119,16 @@ function GameBoard({
     lifelines, eliminatedChoices, isFiftyFiftyActive, hardModeDecoys,
   } = session;
   const [showRudeCat, setShowRudeCat] = useState(false);
-  const excludedTargets = useRef<string[]>([]);
-  const excludedAnswers = useRef<string[]>([]);
 
   const stableChoices = question?.choices ?? [];
   const { status, messages, votes, totalVotes, percentages, recentVotes, resetVotes, channel, setChannel } =
     useTwitchChat(stableChoices, true, streamerChannel);
 
-  const loadQuestion = (targetTier: number, excludes: string[] = [], excludeAnswers: string[] = [], scope: "emotes" | "words" = subMode) => {
+  const loadQuestion = (scope: "emotes" | "words" = subMode) => {
     dispatch({ type: "update", value: { gameState: "loading", selected: null, error: null, eliminatedChoices: new Set(), isFiftyFiftyActive: false } });
     resetVotes();
     try {
-      const q = api.question(targetTier, excludes, excludeAnswers, dynamicData, scope);
+      const q = api.question(dynamicData, scope);
       dispatch({ type: "update", value: { question: q, gameState: "playing" } });
     } catch (err) {
       dispatch({ type: "update", value: { error: err instanceof Error ? err.message : String(err), gameState: "loading" } });
@@ -144,9 +142,7 @@ function GameBoard({
       survivalRoster: api.getRandomTop150Chatters(15, dynamicData), sacrificedLogins: new Set(),
       lifelines: { fiftyFiftyUsed: false },
     } });
-    excludedTargets.current = [];
-    excludedAnswers.current = [];
-    loadQuestion(1, [], [], nextSubMode);
+    loadQuestion(nextSubMode);
   };
 
   const currentRescueTarget = survivalRoster[tier - 1];
@@ -196,14 +192,9 @@ function GameBoard({
   };
 
   const advanceNextTier = () => {
-    if (!question) return;
     const next = tier + 1;
-    const nextEx = [...excludedTargets.current, question.target.name];
-    const nextExA = [...excludedAnswers.current, question.answer.login];
-    excludedTargets.current = nextEx;
-    excludedAnswers.current = nextExA;
     dispatch({ type: "update", value: { tier: next } });
-    loadQuestion(next, nextEx, nextExA, subMode);
+    loadQuestion(subMode);
   };
 
   if (error) return (
@@ -231,7 +222,7 @@ function GameBoard({
 
   // Word trivia is an opt-in under Hard Mode; disable the toggle when the
   // channel's archive has no word questions at all.
-  const wordQuestionCount = (dynamicData?.questions ?? []).filter((q) => q.target.kind === "word").length;
+  const wordQuestionCount = (dynamicData?.targets ?? []).filter((t) => t.kind === "word" && t.name.length >= 5).length;
 
   return (
     <div className="flex flex-col gap-6 w-full">

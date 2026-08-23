@@ -128,7 +128,7 @@ describe("Hard & Close Matchmaking Algorithms", () => {
 
   it("samples unweighted random chatters in ranks 1 to 150 sorted so higher tiers have better chatters", () => {
     const roster = api.getRandomTop150Chatters(8, {
-      ...dynamicWith(makeQuestions(15)),
+      ...emptyDynamic(),
       chatters: sampleChatters,
     });
     expect(roster.length).toBe(8);
@@ -149,7 +149,7 @@ describe("Hard & Close Matchmaking Algorithms", () => {
   });
 
   it("generates unweighted question with 4 choices and valid answer in top 1-150 range", async () => {
-    const q = await api.question(1, [], [], dynamicWith(makeQuestions(15)));
+    const q = await api.question(archiveFromQuestions(makeQuestions(15)));
     expect(q.choices.length).toBe(4);
     expect(q.choices.some((c) => c.login === q.answer.login)).toBe(true);
     expect(q.target.name).toBeDefined();
@@ -167,8 +167,8 @@ describe("Hard & Close Matchmaking Algorithms", () => {
     qs[0].leaderboard.unshift({ login: "streamelements", displayName: "StreamElements", count: 9999 });
 
     const dynamic = {
-      ...dynamicWith(qs),
-      chatters: chattersWithBots,
+      ...archiveFromQuestions(qs),
+      chatters: [...archiveFromQuestions(qs).chatters, ...chattersWithBots],
     };
 
     const top = api.topChatters(10, dynamic);
@@ -179,7 +179,7 @@ describe("Hard & Close Matchmaking Algorithms", () => {
     const roster = api.getRandomTop150Chatters(5, dynamic);
     expect(roster.some((c) => c.login === "streamelements")).toBe(false);
 
-    const q = await api.question(1, [], [], dynamic);
+    const q = await api.question({ ...dynamic, ...archiveFromQuestions(qs) });
     expect(q.choices.some((c) => c.login === "streamelements")).toBe(false);
     expect(q.leaderboard.some((e) => e.login === "streamelements")).toBe(false);
   });
@@ -216,7 +216,11 @@ function makeQuestions(n: number): Question[] {
       { login: "decoy_b", displayName: "decoy_b" },
       { login: "decoy_c", displayName: "decoy_c" },
     ],
-    leaderboard: [{ login: `user${i}`, displayName: `user${i}`, count: 100 }],
+    leaderboard: [
+      { login: `user${i}`, displayName: `user${i}`, count: 100 },
+      { login: "decoy_a", displayName: "decoy_a", count: 50 },
+      { login: "decoy_b", displayName: "decoy_b", count: 40 },
+    ],
   }));
 }
 
@@ -227,13 +231,13 @@ function makeWordQuestions(n: number): Question[] {
   }));
 }
 
-function dynamicWith(questions: Question[]): DynamicStreamerData {
+function emptyDynamic(): DynamicStreamerData {
   return {
     channel: "test",
     twitchId: "1",
     emotesCount: 0,
     targets: [],
-    questions,
+    questions: [],
     higherLowerItems: [],
     chatters: [],
     feudCategories: [],
@@ -260,12 +264,38 @@ function dynamicWith(questions: Question[]): DynamicStreamerData {
   };
 }
 
-describe("Save-Your-Chatters word choice variety (dynamic path)", () => {
-  const questions = makeWordQuestions(15);
+function archiveFromQuestions(questions: Question[]): DynamicStreamerData {
+  const chattersByLogin = new Map<string, { login: string; displayName: string }>();
+  const leaderboards: DynamicStreamerData["leaderboards"] = {};
+  const targets = questions.map((q) => {
+    for (const choice of q.choices) chattersByLogin.set(choice.login, choice);
+    for (const row of q.leaderboard) chattersByLogin.set(row.login, { login: row.login, displayName: row.displayName });
+    leaderboards[`${q.target.kind}:${q.target.name}`] =
+      q.leaderboard.length > 0
+        ? q.leaderboard
+        : q.choices.map((c, i) => ({ login: c.login, displayName: c.displayName, count: 100 - i }));
+    return {
+      kind: q.target.kind,
+      kindLabel: q.target.kindLabel,
+      name: q.target.name,
+      total: q.target.totalUses,
+      url: q.target.url,
+    };
+  });
+  return {
+    ...emptyDynamic(),
+    targets,
+    chatters: [...chattersByLogin.values()],
+    leaderboards,
+  };
+}
 
-  it("keeps a full run varied: at least 10 of 15 targets are distinct", () => {
+describe("Save-Your-Chatters live archive trivia", () => {
+  const questions = makeWordQuestions(15);
+  const archive = archiveFromQuestions(questions);
+
+  it("varies the target across a 15-stage run without excludes", () => {
     const originalRandom = Math.random;
-    // Deterministic LCG seed so this probability-based selection isn't flaky.
     let seed = 10;
     Math.random = () => {
       seed = (seed * 1664525 + 1013904223) >>> 0;
@@ -274,66 +304,83 @@ describe("Save-Your-Chatters word choice variety (dynamic path)", () => {
     try {
       const used: string[] = [];
       for (let tier = 1; tier <= 15; tier++) {
-        const q = api.question(tier, used, [], dynamicWith(questions), "words");
+        const q = api.question(archive, "words");
         used.push(q.target.name);
       }
-      expect(new Set(used).size).toBeGreaterThanOrEqual(10);
+      expect(new Set(used).size).toBeGreaterThan(1);
     } finally {
       Math.random = originalRandom;
     }
   });
 
-  it("varies the tier-1 word choice across runs", async () => {
+  it("does not always serve the first archive target", async () => {
     const seen = new Set<string>();
-    for (let i = 0; i < 30; i++) {
-      const q = await api.question(1, [], [], dynamicWith(questions), "words");
+    for (let i = 0; i < 40; i++) {
+      const q = await api.question(archiveFromQuestions(makeQuestions(15)));
       seen.add(q.target.name);
     }
     expect(seen.size).toBeGreaterThan(1);
   });
 
-  it("skips short words and stop words (such as 'get' and 'here')", async () => {
+  it("still builds stage 2 after the first target was bye", async () => {
+    const qs = makeQuestions(8);
+    qs[0] = { ...qs[0], target: { ...qs[0].target, name: "bye" } };
+    const data = archiveFromQuestions(qs);
+    const first = api.question(data);
+    const second = api.question(data);
+    expect(first.target.name).toBeDefined();
+    expect(second.target.name).toBeDefined();
+    expect(second.choices.length).toBe(4);
+  });
+
+  it("skips short words and stop words in words scope", async () => {
     const qs = makeWordQuestions(3);
     qs[0] = { ...qs[0], target: { ...qs[0].target, name: "get" } };
     qs[1] = { ...qs[1], target: { ...qs[1].target, name: "here" } };
-    const q = await api.question(1, [], [], dynamicWith(qs), "words");
+    const q = await api.question(archiveFromQuestions(qs), "words");
     expect(q.target.name).not.toBe("get");
     expect(q.target.name).not.toBe("here");
     expect(q.target.name.length).toBeGreaterThanOrEqual(5);
   });
 
-  it("allows repeats once every candidate has been used this run", async () => {
-    const all = questions.map((q) => q.target.name);
-    const q = await api.question(1, all, [], dynamicWith(questions), "words");
-    expect(q.target.name).toBeDefined();
+  it("throws when the archive has no trivia targets", async () => {
+    expect(() => api.question(emptyDynamic())).toThrow(/live chatter data/);
   });
 
-  it("throws when the archive has no trivia questions", async () => {
-    expect(() => api.question(1, [], [], dynamicWith([]))).toThrow(/live chatter data/);
+  it("skips targets used by fewer than 3 chatters", () => {
+    const qs = makeQuestions(2);
+    qs[0] = {
+      ...qs[0],
+      target: { ...qs[0].target, name: "kiawalooking" },
+      leaderboard: [{ login: "splinteredspike", displayName: "splinteredspike", count: 1 }],
+    };
+    const q = api.question(archiveFromQuestions(qs));
+    expect(q.target.name).not.toBe("kiawalooking");
+    expect(q.choices.length).toBe(4);
+  });
+
+  it("throws when every target has fewer than 3 chatters", () => {
+    const qs = makeQuestions(2).map((q) => ({
+      ...q,
+      leaderboard: [{ login: "splinteredspike", displayName: "splinteredspike", count: 1 }],
+    }));
+    expect(() => api.question(archiveFromQuestions(qs))).toThrow(/live chatter data/);
   });
 });
 
 describe("Millionaire trivia scopes (emotes-only default, words opt-in)", () => {
   it("serves ONLY 7TV/Twitch emotes by default", async () => {
-    const q = await api.question(1, [], [], dynamicWith(makeQuestions(15)));
+    const mixed = [...makeQuestions(8), ...makeWordQuestions(8)];
+    const q = await api.question(archiveFromQuestions(mixed));
     expect(q.target.kind).toBe("7tv");
   });
 
-  it("throws by default when the archive has only word questions (words are opt-in)", async () => {
-    expect(() => api.question(1, [], [], dynamicWith(makeWordQuestions(3)))).toThrow(/live chatter data/);
+  it("throws by default when the archive has only word targets (words are opt-in)", async () => {
+    expect(() => api.question(archiveFromQuestions(makeWordQuestions(3)))).toThrow(/live chatter data/);
   });
 
   it("serves ONLY word questions when scope is 'words'", async () => {
-    const q = await api.question(1, [], [], dynamicWith(makeWordQuestions(15)), "words");
+    const q = await api.question(archiveFromQuestions(makeWordQuestions(15)), "words");
     expect(q.target.kind).toBe("word");
-  });
-
-  it("words scope also filters stop words and short words", async () => {
-    const qs = makeWordQuestions(4);
-    qs[0] = { ...qs[0], target: { ...qs[0].target, name: "like" } };
-    qs[1] = { ...qs[1], target: { ...qs[1].target, name: "hi" } };
-    const q = await api.question(1, [], [], dynamicWith(qs), "words");
-    expect(q.target.name).not.toBe("like");
-    expect(q.target.name).not.toBe("hi");
   });
 });
