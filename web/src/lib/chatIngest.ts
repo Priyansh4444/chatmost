@@ -1109,13 +1109,11 @@ export function buildArchive(channel: string, agg: Aggregate, meta: { twitchId: 
     if (isBot(c.login)) continue;
     const top = [...c.targets.entries()]
       .map(([key, count]) => ({ key, count, t: agg.targets.get(key) }))
-      .filter((x): x is { key: string; count: number; t: TargetAcc } => x.t !== undefined)
+      .filter((x): x is { key: string; count: number; t: TargetAcc } => x.t !== undefined && (x.t.kind === "7tv" || x.t.kind === "twitch"))
       .sort((a, b) => b.count - a.count)
       .slice(0, 3);
     for (const { t, count } of top) {
       if (count < 5) continue;
-      // Trivia and matchups skip short filler words
-      if (t.kind === "word" && (t.name.length < 5 || STOP_WORDS.has(t.name.toLowerCase()))) continue;
       chatterLoreMatchups.push({
         rank: matchupRank++,
         login: c.login,

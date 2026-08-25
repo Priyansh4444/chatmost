@@ -61,69 +61,37 @@ describe("Hard & Close Matchmaking Algorithms", () => {
     }
   });
 
-  it("prefers a close 7TV/Twitch emote over an equally-close word for the next matchup", () => {
-    const current: MatchupItem = { rank: 1, login: "viewer_1", displayName: "Viewer1", targetKind: "7tv", targetName: "EMOTE_A", targetUrl: null, count: 100 };
-    const pool: MatchupItem[] = [
-      current,
-      { rank: 2, login: "viewer_2", displayName: "Viewer2", targetKind: "7tv", targetName: "EMOTE_B", targetUrl: null, count: 150 },
-      { rank: 3, login: "viewer_3", displayName: "Viewer3", targetKind: "word", targetName: "substantial", targetUrl: null, count: 120 },
-      { rank: 4, login: "viewer_4", displayName: "Viewer4", targetKind: "7tv", targetName: "EMOTE_C", targetUrl: null, count: 500 },
-    ];
-    for (let i = 0; i < 20; i++) {
-      const next = pickNextMatchup(current, pool, i);
-      expect(next.targetName).toBe("EMOTE_B");
-    }
-  });
-
-  it("buildMatchups keeps emotes and drops words shorter than 7 chars when the pool is large", () => {
-    const items: ChatterLoreMatchup[] = [];
-    for (let i = 0; i < 35; i++) {
-      items.push(makeMatchup(i, "7tv", `EMOTE_${i}`));
-    }
-    items.push(makeMatchup(100, "word", "lengthyword"));
-    items.push(makeMatchup(101, "word", "anotherlong"));
-    items.push(makeMatchup(102, "word", "shorty")); // 6 chars → dropped
-    const built = buildMatchups(items);
-    expect(built.length).toBe(37); // 35 emotes + 2 long words, no short word
-    for (const m of built) {
-      if (m.targetKind === "word") expect(m.targetName.length).toBeGreaterThanOrEqual(7);
-    }
-  });
-
-  it("buildMatchups falls back to 5+ char words on sparse channels so the mode stays playable", () => {
+  it("buildMatchups keeps only 7TV and Twitch emotes and excludes all words", () => {
     const items: ChatterLoreMatchup[] = [
       makeMatchup(0, "7tv", "EMOTE_A"),
-      makeMatchup(1, "7tv", "EMOTE_B"),
-      makeMatchup(2, "7tv", "EMOTE_C"),
-      makeMatchup(3, "7tv", "EMOTE_D"),
-      makeMatchup(4, "7tv", "EMOTE_E"),
-      makeMatchup(5, "word", "longwordseven"),
-      makeMatchup(6, "word", "goodenough"),
-      makeMatchup(7, "word", "shorter"),
-      makeMatchup(8, "word", "words"),
+      makeMatchup(1, "twitch", "EMOTE_B"),
+      makeMatchup(2, "word", "lengthyword"),
+      makeMatchup(3, "word", "anotherlong"),
+      makeMatchup(4, "7tv", "EMOTE_C"),
     ];
     const built = buildMatchups(items);
-    expect(built.length).toBeGreaterThanOrEqual(9); // fallback pulled the 5-6 char words back in
-    const wordTargets = built.filter((m) => m.targetKind === "word").map((m) => m.targetName);
-    expect(wordTargets).toContain("shorter");
-    expect(wordTargets).toContain("words");
+    expect(built.length).toBe(3);
+    for (const m of built) {
+      expect(m.targetKind).not.toBe("word");
+      expect(m.targetKind === "7tv" || m.targetKind === "twitch").toBe(true);
+    }
   });
 
-  it("pickPrioritizedMatchup randomizes the opening card and leans on emotes", () => {
+  it("pickPrioritizedMatchup returns a valid emote matchup from the pool", () => {
     const pool: MatchupItem[] = [
       ...Array.from({ length: 30 }, (_, i) => makeMatchup(i, "7tv", `EMOTE_${i}`)),
-      ...Array.from({ length: 30 }, (_, i) => makeMatchup(100 + i, "word", `longword${i}`)),
-    ];
-    let emotes = 0;
+      ...Array.from({ length: 30 }, (_, i) => makeMatchup(30 + i, "twitch", `TWITCH_${i}`)),
+    ].map((m, idx) => ({ ...m, rank: idx + 1 }));
     const seen = new Set<string>();
-    for (let i = 0; i < 200; i++) {
+    for (let i = 0; i < 50; i++) {
       const pick = pickPrioritizedMatchup(pool);
-      if (!pick) continue;
-      if (pick.targetKind === "7tv" || pick.targetKind === "twitch") emotes++;
-      seen.add(pick.targetName);
+      expect(pick).toBeDefined();
+      if (pick) {
+        expect(pick.targetKind === "7tv" || pick.targetKind === "twitch").toBe(true);
+        seen.add(pick.targetName);
+      }
     }
-    expect(emotes / 200).toBeGreaterThan(0.55); // emote-biased
-    expect(seen.size).toBeGreaterThan(1); // varies across runs
+    expect(seen.size).toBeGreaterThan(1);
   });
 
   it("samples unweighted random chatters in ranks 1 to 150 sorted so higher tiers have better chatters", () => {
@@ -359,12 +327,37 @@ describe("Save-Your-Chatters live archive trivia", () => {
     expect(q.choices.length).toBe(4);
   });
 
-  it("throws when every target has fewer than 3 chatters", () => {
-    const qs = makeQuestions(2).map((q) => ({
+  it("prioritizes famous emotes with 10+ uses from the top over low-usage emotes", () => {
+    const famous = makeQuestions(5); // total uses >= 750
+    const obscure = makeQuestions(5).map((q, i) => ({
       ...q,
-      leaderboard: [{ login: "splinteredspike", displayName: "splinteredspike", count: 1 }],
+      target: {
+        ...q.target,
+        name: `OBSCURE_${i + 1}`,
+        totalUses: 3, // < 10 uses
+      },
     }));
-    expect(() => api.question(archiveFromQuestions(qs))).toThrow(/live chatter data/);
+    const data = archiveFromQuestions([...famous, ...obscure]);
+    for (let i = 0; i < 20; i++) {
+      const q = api.question(data);
+      expect(q.target.totalUses).toBeGreaterThanOrEqual(10);
+      expect(q.target.name).not.toMatch(/^OBSCURE_/);
+    }
+  });
+
+  it("falls back to low-usage emotes if no 10+ use emotes exist on sparse channels", () => {
+    const obscure = makeQuestions(3).map((q, i) => ({
+      ...q,
+      target: {
+        ...q.target,
+        name: `OBSCURE_${i + 1}`,
+        totalUses: 4, // < 10 uses
+      },
+    }));
+    const data = archiveFromQuestions(obscure);
+    const q = api.question(data);
+    expect(q.target.name).toMatch(/^OBSCURE_/);
+    expect(q.choices.length).toBe(4);
   });
 });
 

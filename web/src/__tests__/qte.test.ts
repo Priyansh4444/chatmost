@@ -78,3 +78,29 @@ describe("QTE chatter pool (live chat drafting)", () => {
     expect(logins).toEqual(["viewer_a", "viewer_c"]);
   });
 });
+
+describe("QTE Vote Parsing & Verdict Accuracy", () => {
+  it("accurately attributes votes to P1 and P2 without false-positive substring steals", async () => {
+    const { parseTwitchVote } = await import("../lib/twitchChat");
+    const choices = [
+      { login: "cat", displayName: "Cat" },
+      { login: "doggo", displayName: "Doggo" },
+    ];
+
+    // P1 votes
+    expect(parseTwitchVote("1", choices)?.index).toBe(0);
+    expect(parseTwitchVote("!1", choices)?.index).toBe(0);
+    expect(parseTwitchVote("vote cat", choices)?.index).toBe(0);
+    expect(parseTwitchVote("@cat", choices)?.index).toBe(0);
+
+    // P2 votes
+    expect(parseTwitchVote("2", choices)?.index).toBe(1);
+    expect(parseTwitchVote("!2", choices)?.index).toBe(1);
+    expect(parseTwitchVote("vote doggo", choices)?.index).toBe(1);
+    expect(parseTwitchVote("@doggo", choices)?.index).toBe(1);
+
+    // Unrelated messages with substrings should not vote for P1
+    expect(parseTwitchVote("education is important", choices)).toBeNull();
+    expect(parseTwitchVote("scattered clouds today", choices)).toBeNull();
+  });
+});

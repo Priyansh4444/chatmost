@@ -90,9 +90,8 @@ function useHigherLowerGame({
     }));
   })();
 
-  // Load chatter lore matchups pool (Mode 3) — short common words ("get",
-  // "like", ...) make boring comparisons, so the pool leads with 7TV/Twitch
-  // emotes plus 7+ char words, randomized fresh on every run.
+  // Load chatter lore matchups pool (Mode 3) — 7TV/Twitch emotes only,
+  // randomized fresh on every run.
   const topMatchups = buildMatchups(api.chatterLoreMatchups(dynamicData));
 
   // Current Card A & B for Chatters
@@ -221,8 +220,10 @@ function useHigherLowerGame({
       // (regardless of whether the local player was right).
       const maxVotes = Math.max(...votes);
       const maxCount = votes.filter((v) => v === maxVotes).length;
-      const chatMajorityPickedHigher = maxCount === 1 && votes.indexOf(maxVotes) === 0;
-      const chatMajorityWrong = totalVotes > 0 && maxCount === 1 && chatMajorityPickedHigher !== correct;
+      const chatMajorityChoice = maxCount === 1 ? votes.indexOf(maxVotes) : -1; // 0 = higher, 1 = lower
+      const chatCorrect =
+        chatMajorityChoice === 0 ? valB >= valA : chatMajorityChoice === 1 ? valB <= valA : false;
+      const chatMajorityWrong = totalVotes > 0 && maxCount === 1 && !chatCorrect;
       if (chatMajorityWrong) {
         setShowRudeCat(true);
       }
@@ -573,8 +574,6 @@ function useHigherLowerGame({
                     : mode === "matchups"
                     ? matchupB?.metric === "messages"
                       ? "Mystery Chatter"
-                      : matchupB?.targetKind === "word"
-                      ? "Mystery Word"
                       : "Mystery Emote"
                     : mode === "emotes"
                     ? "Mystery Emote"

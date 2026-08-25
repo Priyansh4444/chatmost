@@ -80,12 +80,12 @@ export function parseTwitchVote(
     (activeChoices[0].login.toLowerCase() === "higher" || activeChoices[0].displayName.toLowerCase() === "higher") &&
     (activeChoices[1].login.toLowerCase() === "lower" || activeChoices[1].displayName.toLowerCase() === "lower");
 
-  // 1. Direct Option Identifiers (1-4, A-D, !1-!4, !a-!d, #1-#4)
+  // 1. Direct Option Identifiers (1-4, A-D, !1-!4, !a-!d, #1-#4, p1/p2)
   const exactOptionMap: Record<string, number> = {
-    "1": 0, "a": 0, "!1": 0, "!a": 0, "#1": 0, "option 1": 0, "option a": 0, "vote 1": 0, "vote a": 0,
-    "2": 1, "b": 1, "!2": 1, "!b": 1, "#2": 1, "option 2": 1, "option b": 1, "vote 2": 1, "vote b": 1,
-    "3": 2, "c": 2, "!3": 2, "!c": 2, "#3": 2, "option 3": 2, "option c": 2, "vote 3": 2, "vote c": 2,
-    "4": 3, "d": 3, "!4": 3, "!d": 3, "#4": 3, "option 4": 3, "option d": 3, "vote 4": 3, "vote d": 3,
+    "1": 0, "a": 0, "!1": 0, "!a": 0, "#1": 0, "option 1": 0, "option a": 0, "vote 1": 0, "vote a": 0, "p1": 0, "!p1": 0, "#p1": 0, "player 1": 0, "player1": 0,
+    "2": 1, "b": 1, "!2": 1, "!b": 1, "#2": 1, "option 2": 1, "option b": 1, "vote 2": 1, "vote b": 1, "p2": 1, "!p2": 1, "#p2": 1, "player 2": 1, "player2": 1,
+    "3": 2, "c": 2, "!3": 2, "!c": 2, "#3": 2, "option 3": 2, "option c": 2, "vote 3": 2, "vote c": 2, "p3": 2, "!p3": 2, "#p3": 2, "player 3": 2, "player3": 2,
+    "4": 3, "d": 3, "!4": 3, "!d": 3, "#4": 3, "option 4": 3, "option d": 3, "vote 4": 3, "vote d": 3, "p4": 3, "!p4": 3, "#p4": 3, "player 4": 3, "player4": 3,
   };
 
   if (rawClean in exactOptionMap) {
@@ -165,19 +165,6 @@ export function parseTwitchVote(
     for (const [i, { choice, subTokens }] of choiceSubTokens.entries()) {
       if (subTokens.includes(word)) {
         return { index: i, name: choice.displayName, matchedToken: word };
-      }
-    }
-  }
-
-  // C. Substring matching for distinctive stems (>= 3 chars)
-  for (const word of msgTokens) {
-    if (word.length < 3) continue;
-
-    for (const [i, { choice, subTokens }] of choiceSubTokens.entries()) {
-      for (const st of subTokens) {
-        if (st.length >= 3 && (st.includes(word) || word.includes(st))) {
-          return { index: i, name: choice.displayName, matchedToken: word };
-        }
       }
     }
   }

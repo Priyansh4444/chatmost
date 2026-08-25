@@ -8,7 +8,7 @@ import {
   type QTEVoteMessage,
 } from "@/lib/qteTypes";
 import { qteAudio } from "@/lib/qteAudio";
-import { twitchChat, type TwitchChatMessage } from "@/lib/twitchChat";
+import { twitchChat, parseTwitchVote, type TwitchChatMessage } from "@/lib/twitchChat";
 import confetti from "canvas-confetti";
 import {
   Volume2,
@@ -286,11 +286,6 @@ export function QTEModal({
     const durationMs = TOTAL_VOTING_SECONDS * 1000;
     voterMapRef.current.clear();
 
-    const p1Target = p1.username.toLowerCase();
-    const p1DisplayName = (p1.displayName || p1.username).toLowerCase();
-    const p2Target = p2?.username.toLowerCase() || "";
-    const p2DisplayName = (p2?.displayName || p2?.username || "").toLowerCase();
-
     // Listen to real live Twitch chat for votes
     const unsubMsg = twitchChat.onMessage((msg: TwitchChatMessage) => {
       const raw = msg.message.trim().toLowerCase();
@@ -300,41 +295,25 @@ export function QTEModal({
       if (mode === "solo_trial") {
         // Option 1 = Spare / Pardon
         const isSpare =
-          /^(1|!1|#1|a|!a|spare|!spare|save|pardon|innocent|live|yes|free)\b/i.test(raw) ||
-          raw === "1" ||
-          raw.includes("spare") ||
-          raw.includes("pardon") ||
-          raw.includes("innocent");
+          /^(1|!1|#1|a|!a)\b/i.test(raw) ||
+          /\b(spare|pardon|innocent|save|live|yes|free)\b/i.test(raw);
 
         // Option 2 = Ban / Timeout
         const isBan =
-          /^(2|!2|#2|b|!b|ban|!ban|guilty|kill|timeout|banned|no|dead)\b/i.test(raw) ||
-          raw === "2" ||
-          raw.includes("ban") ||
-          raw.includes("guilty") ||
-          raw.includes("timeout");
-
-        if (isSpare) choice = "spare";
-        else if (isBan) choice = "ban";
-      } else {
-        // Option 1 = P1
-        const isP1 =
-          /^(1|!1|#1|a|!a)\b/i.test(raw) ||
-          raw === "1" ||
-          raw === `@${p1Target}` ||
-          raw.includes(p1Target) ||
-          (p1DisplayName.length >= 3 && raw.includes(p1DisplayName));
-
-        // Option 2 = P2
-        const isP2 =
           /^(2|!2|#2|b|!b)\b/i.test(raw) ||
-          raw === "2" ||
-          raw === `@${p2Target}` ||
-          (p2Target && raw.includes(p2Target)) ||
-          (p2DisplayName.length >= 3 && raw.includes(p2DisplayName));
+          /\b(ban|guilty|kill|timeout|banned|no|dead)\b/i.test(raw);
 
-        if (isP1) choice = "p1";
-        else if (isP2) choice = "p2";
+        if (isSpare && !isBan) choice = "spare";
+        else if (isBan && !isSpare) choice = "ban";
+      } else {
+        // Option 1 vs Option 2 (Duo Duel)
+        const voteRes = parseTwitchVote(msg.message, [
+          { login: p1.username, displayName: p1.displayName || p1.username },
+          { login: p2?.username || "p2", displayName: p2?.displayName || p2?.username || "P2" },
+        ]);
+        if (voteRes) {
+          choice = voteRes.index === 0 ? "p1" : voteRes.index === 1 ? "p2" : undefined;
+        }
       }
 
       if (choice) {
@@ -346,6 +325,8 @@ export function QTEModal({
           if (v === "p1" || v === "spare") count1++;
           else if (v === "p2" || v === "ban") count2++;
         }
+        voteP1Ref.current = count1;
+        voteP2Ref.current = count2;
         setVoteCountP1(count1);
         setVoteCountP2(count2);
       }
@@ -373,16 +354,27 @@ export function QTEModal({
         clearInterval(timer);
         unsubMsg();
 
+        let count1 = 0;
+        let count2 = 0;
+        for (const v of voterMapRef.current.values()) {
+          if (v === "p1" || v === "spare") count1++;
+          else if (v === "p2" || v === "ban") count2++;
+        }
+        voteP1Ref.current = count1;
+        voteP2Ref.current = count2;
+        setVoteCountP1(count1);
+        setVoteCountP2(count2);
+
         let result: VerdictResult;
         if (mode === "solo_trial") {
-          if (voteP1Ref.current >= voteP2Ref.current) {
+          if (count1 >= count2) {
             result = "spared";
           } else {
-            result = voteP2Ref.current % 2 === 0 ? "banned" : "timedout";
+            result = count2 % 2 === 0 ? "banned" : "timedout";
           }
         } else {
-          if (voteP1Ref.current > voteP2Ref.current) result = "p1_won";
-          else if (voteP2Ref.current > voteP1Ref.current) result = "p2_won";
+          if (count1 > count2) result = "p1_won";
+          else if (count2 > count1) result = "p2_won";
           else result = "tie";
         }
         applyVerdict(result);

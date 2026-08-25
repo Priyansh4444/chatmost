@@ -170,16 +170,12 @@ function shuffle<T>(arr: readonly T[]): T[] {
   return a;
 }
 
-function liveQuestion(
+function buildQuestionFromPool(
+  pool: readonly TopTarget[],
   dynamic: DynamicStreamerData,
-  scope: "emotes" | "words"
+  chatters: Choice[]
 ): Question | null {
-  const chatters = (dynamic.chatters ?? []).filter((c) => !isBot(c.login));
-  const isEmote = (t: TopTarget) => t.kind === "7tv" || t.kind === "twitch";
-  const isWord = (t: TopTarget) =>
-    t.kind === "word" && t.name.length >= 5 && !STOP_WORDS.has(t.name.toLowerCase());
-  const pool = shuffle((dynamic.targets ?? []).filter((t) => (scope === "words" ? isWord(t) : isEmote(t))));
-  for (const t of pool) {
+  for (const t of shuffle(pool)) {
     const lb = (dynamic.leaderboards?.[`${t.kind}:${t.name}`] ?? []).filter((e) => !isBot(e.login));
     const users = new Set(lb.map((e) => e.login));
     // Skip one-off spam / private emotes: at least 3 real chatters must have used it.
@@ -218,6 +214,30 @@ function liveQuestion(
     };
   }
   return null;
+}
+
+function liveQuestion(
+  dynamic: DynamicStreamerData,
+  scope: "emotes" | "words"
+): Question | null {
+  const chatters = (dynamic.chatters ?? []).filter((c) => !isBot(c.login));
+  const isEmote = (t: TopTarget) => t.kind === "7tv" || t.kind === "twitch";
+  const isWord = (t: TopTarget) =>
+    t.kind === "word" && t.name.length >= 5 && !STOP_WORDS.has(t.name.toLowerCase());
+  const matchingTargets = (dynamic.targets ?? []).filter((t) => (scope === "words" ? isWord(t) : isEmote(t)));
+
+  // Prioritize famous/top emotes: emotes with at least 10 uses from the top 150 most-used
+  const famousCandidates = matchingTargets
+    .filter((t) => t.total >= 10)
+    .slice(0, 150);
+
+  if (famousCandidates.length > 0) {
+    const picked = buildQuestionFromPool(famousCandidates, dynamic, chatters);
+    if (picked) return picked;
+  }
+
+  // Fallback if no famous candidates exist or none have enough qualifying chatters (sparse datasets)
+  return buildQuestionFromPool(matchingTargets, dynamic, chatters);
 }
 
 // Active dynamic streamer data is provided by callers (from the react-query
