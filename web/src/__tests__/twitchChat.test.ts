@@ -123,4 +123,29 @@ describe("Twitch Chat Voting & Sub-token / Alias Matching", () => {
     expect(parseTwitchVote("that's not higher", hlChoices)?.index).toBe(1);
     expect(parseTwitchVote("no, lower is wrong", hlChoices)?.index).toBe(0);
   });
+
+  it("handles successive question rounds when choices update", () => {
+    const round1Choices: ActiveChoice[] = [
+      { login: "alice", displayName: "Alice" },
+      { login: "bob", displayName: "Bob" },
+      { login: "charlie", displayName: "Charlie" },
+      { login: "dave", displayName: "Dave" },
+    ];
+
+    expect(parseTwitchVote("1", round1Choices)?.name).toBe("Alice");
+    expect(parseTwitchVote("bob", round1Choices)?.name).toBe("Bob");
+
+    // Next round with different choices
+    const round2Choices: ActiveChoice[] = [
+      { login: "eve", displayName: "Eve" },
+      { login: "frank", displayName: "Frank" },
+      { login: "grace", displayName: "Grace" },
+      { login: "heidi", displayName: "Heidi" },
+    ];
+
+    expect(parseTwitchVote("1", round2Choices)?.name).toBe("Eve");
+    expect(parseTwitchVote("frank", round2Choices)?.name).toBe("Frank");
+    // Old round choice name shouldn't match
+    expect(parseTwitchVote("bob", round2Choices)).toBeNull();
+  });
 });
