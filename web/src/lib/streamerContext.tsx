@@ -4,9 +4,7 @@ import type { DynamicStreamerData } from "./dynamicStreamer";
 import { loadDynamicStreamerData, clearStreamerMemoryCache } from "./dynamicStreamer";
 import { archiveCacheGet, archiveCacheSet, buildChatArchive, clearArchiveCache, incrementalArchiveUpdate, isUsableArchive, type CachedArchive, type IngestProgress } from "./chatIngest";
 
-/** Channels whose deep archive is served (and cached) from the server route
- * `/api/archive?channel=…` instead of being built client-side in IndexedDB. */
-const SERVER_ARCHIVE_CHANNELS = new Set<string>();
+
 
 /**
  * Load a channel's archive from the server-side cache route. Throws when the
@@ -129,20 +127,23 @@ export function StreamerProvider({ children }: { children: ReactNode }) {
     const runId = ++runIdRef.current;
 
     const run = async () => {
-      // Server-cached channels: fetch the archive from the API route and never
-      // build it in the browser. Fall back to the normal client flow if the
-      // server route can't produce an archive.
-      if (SERVER_ARCHIVE_CHANNELS.has(channel)) {
-        try {
-          const data = await loadServerArchive(channel);
-          if (runIdRef.current !== runId) return;
-          setArchiveData(data);
-          setIngestProgress({ status: "done", stage: "Archive ready", current: 0, total: 0, detail: "Cached server-side" });
-          return;
-        } catch (err) {
-          if (runIdRef.current !== runId) return;
-          console.warn(`Server archive for #${channel} unavailable; using client-side build.`, err);
-        }
+      // Attempt to load from server-side cache route first. If the server has
+      // the archive cached in KV, load it instantly. Otherwise seamlessly fall
+      // back to local IndexedDB and client-side ingestion.
+      try {
+        const data = await loadServerArchive(channel);
+        if (runIdRef.current !== runId) return;
+        setArchiveData(data);
+        setIngestProgress({
+          status: "done",
+          stage: "Archive ready",
+          current: data.stats?.messages ?? 0,
+          total: data.stats?.messages ?? 0,
+          detail: "Cached server-side",
+        });
+        return;
+      } catch {
+        if (runIdRef.current !== runId) return;
       }
 
       const cached = await archiveCacheGet(channel);
