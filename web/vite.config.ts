@@ -4,6 +4,7 @@ import path from "node:path";
 
 export default defineConfig({
   root: import.meta.dirname,
+  envDir: path.resolve(import.meta.dirname, ".."),
   plugins: [
     react({
       babel: {
@@ -18,6 +19,7 @@ export default defineConfig({
       "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
+  worker: { format: "es" as const },
   build: {
     outDir: "dist",
     chunkSizeWarningLimit: 20000,
@@ -33,5 +35,9 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    headers: {
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "require-corp",
+    },
   },
 });

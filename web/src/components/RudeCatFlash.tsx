@@ -1,10 +1,11 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 interface RudeCatFlashProps {
   show: boolean;
   onDismiss?: () => void;
   title?: string;
   duration?: number;
+  chance?: number;
 }
 
 export function RudeCatFlash({
@@ -12,17 +13,37 @@ export function RudeCatFlash({
   onDismiss,
   title = "CHAT WAS WRONG",
   duration = 1800,
+  chance = 0.3,
 }: RudeCatFlashProps) {
-  // The parent controls `show`; this only schedules the auto-dismiss
-  useEffect(() => {
-    if (!show) return;
-    const timer = setTimeout(() => {
-      onDismiss?.();
-    }, duration);
-    return () => clearTimeout(timer);
-  }, [show, duration, onDismiss]);
+  const [shouldRender, setShouldRender] = useState(false);
 
-  if (!show) return null;
+  // The parent controls `show`; 30% random chance to actually flash when triggered
+  useEffect(() => {
+    if (!show) {
+      const t = setTimeout(() => setShouldRender(false), 0);
+      return () => clearTimeout(t);
+    }
+
+    if (Math.random() <= chance) {
+      const tStart = setTimeout(() => setShouldRender(true), 0);
+      const timer = setTimeout(() => {
+        setShouldRender(false);
+        onDismiss?.();
+      }, duration);
+      return () => {
+        clearTimeout(tStart);
+        clearTimeout(timer);
+      };
+    } else {
+      const t = setTimeout(() => {
+        setShouldRender(false);
+        onDismiss?.();
+      }, 0);
+      return () => clearTimeout(t);
+    }
+  }, [show, duration, onDismiss, chance]);
+
+  if (!shouldRender) return null;
 
   return (
     <div

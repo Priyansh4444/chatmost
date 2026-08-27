@@ -26,7 +26,9 @@ export function useTwitchChat(
   // Map of voter username -> { choiceIndex, choiceName } (tracks active vote & overrides)
   const voterMapRef = useRef<Map<string, { choiceIndex: number; choiceName: string }>>(new Map());
   const choicesRef = useRef<ActiveChoice[]>(activeChoices);
-  choicesRef.current = activeChoices;
+  useEffect(() => {
+    choicesRef.current = activeChoices;
+  }, [activeChoices]);
 
   // Switch channel dynamically if targetChannel changes (state is already fresh
   // because the parent pages remount per channel via key={channel})
@@ -34,8 +36,10 @@ export function useTwitchChat(
     if (targetChannel && targetChannel.trim() && targetChannel.toLowerCase() !== twitchChat.currentChannel) {
       twitchChat.setChannel(targetChannel.trim().toLowerCase());
       voterMapRef.current.clear();
-      setVotes(new Array(activeChoices.length).fill(0));
-      setRecentVotes([]);
+      queueMicrotask(() => {
+        setVotes(new Array(activeChoices.length).fill(0));
+        setRecentVotes([]);
+      });
     }
   }, [targetChannel]);
 
@@ -47,8 +51,10 @@ export function useTwitchChat(
     if (prevChoicesKeyRef.current !== key) {
       prevChoicesKeyRef.current = key;
       voterMapRef.current.clear();
-      setVotes(new Array(activeChoices.length).fill(0));
-      setRecentVotes([]);
+      queueMicrotask(() => {
+        setVotes(new Array(activeChoices.length).fill(0));
+        setRecentVotes([]);
+      });
     }
   }, [activeChoices]);
 

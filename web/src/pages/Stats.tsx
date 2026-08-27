@@ -24,6 +24,7 @@ import {
   Check,
   CheckCircle2,
   XCircle,
+  X,
 } from "lucide-react";
 
 type StatsTab = "feud" | "longest" | "chatters";
@@ -544,8 +545,27 @@ function FeudTab({ model }: { model: StatsPageModel }) {
                     }}
                     onKeyDown={handleKeyDown}
                     disabled={strikes >= 3 || revealedRanks.size === 10}
-                    className="border-white/[0.08] bg-white/[0.02] text-xs font-sans text-zinc-100 placeholder:text-zinc-700 focus-visible:border-white/30 w-full"
+                    className={cn(
+                      "border-white/[0.08] bg-white/[0.02] text-xs font-sans text-zinc-100 placeholder:text-zinc-700 focus-visible:border-white/30 w-full",
+                      guess && "pr-8"
+                    )}
                   />
+                  {guess && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setGuess("");
+                        setShowSuggestions(false);
+                        setSelectedSuggestionIdx(-1);
+                        feudInputRef.current?.focus();
+                      }}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 p-0.5 rounded transition-colors"
+                      title="Clear guess input"
+                      aria-label="Clear guess input"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
 
                   {/* Autocomplete Suggestions */}
                   {showSuggestions && suggestions.length > 0 && (
@@ -574,7 +594,7 @@ function FeudTab({ model }: { model: StatsPageModel }) {
                   )}
                 </div>
 
-                <div className="flex gap-1.5">
+                <div className="flex flex-wrap gap-1.5">
                   <Button
                     type="submit"
                     size="sm"
@@ -583,13 +603,36 @@ function FeudTab({ model }: { model: StatsPageModel }) {
                   >
                     Submit
                   </Button>
-                  <Button type="button" size="sm" variant="outline" onClick={revealAll}
-                    className="border-white/[0.08] bg-transparent text-zinc-400 hover:text-zinc-200 text-xs">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => resetFeud(selectedCategoryIdx)}
+                    disabled={revealedRanks.size === 0 && strikes === 0 && !guess && !feedback}
+                    className="border-white/[0.08] bg-transparent text-zinc-400 hover:text-zinc-200 text-xs"
+                    title="Clear revealed answers & reset current board"
+                  >
+                    Clear
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={revealAll}
+                    disabled={revealedRanks.size === 10}
+                    className="border-white/[0.08] bg-transparent text-zinc-400 hover:text-zinc-200 text-xs"
+                    title="Reveal all answers"
+                  >
                     Reveal
                   </Button>
-                  <Button type="button" size="sm" variant="outline"
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
                     onClick={() => resetFeud((selectedCategoryIdx + 1) % feudCategories.length)}
-                    className="border-white/[0.08] bg-transparent text-zinc-400 hover:text-zinc-200 text-xs">
+                    className="border-white/[0.08] bg-transparent text-zinc-400 hover:text-zinc-200 text-xs"
+                    title="Next category"
+                  >
                     Next
                   </Button>
                 </div>

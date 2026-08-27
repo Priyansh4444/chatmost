@@ -7,18 +7,9 @@ dist/
 *.local
 *.log
 .DS_Store
-__pycache__/
 
 # Test outputs
 .profile/
 web/e2e/.profile/
 playwright-report/
 test-results/
-
-# Legacy / local workspace
-/target/
-Cargo.lock
-Cargo.toml
-smash-chat-web/
-word-moments/
-**/*.rs.bk
