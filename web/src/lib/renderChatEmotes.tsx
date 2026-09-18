@@ -58,48 +58,66 @@ export function renderChatEmotes(
   // Split text by whitespace into words and spaces while preserving whitespace
   const tokens = text.split(/(\s+)/);
 
-  return (
-    <span>
-      {tokens.map((token, i) => {
-        // If it's pure whitespace, render as-is
-        if (/^\s+$/.test(token)) {
-          return <span key={i}>{token}</span>;
-        }
+  // Coalesce consecutive plain tokens into a single text run so a message
+  // with no emotes renders as one text node instead of one span per token.
+  const nodes: ReactNode[] = [];
+  let plain = "";
+  let key = 0;
 
-        // Check if token matches an emote in emoteMap
-        let emoteUrl: string | undefined;
-        if (emoteMap) {
-          if (emoteMap instanceof Map) {
-            emoteUrl = emoteMap.get(token) || emoteMap.get(token.toLowerCase());
-          } else {
-            emoteUrl = emoteMap[token] || emoteMap[token.toLowerCase()];
-          }
-        }
+  const flushPlain = () => {
+    if (plain) {
+      nodes.push(plain);
+      plain = "";
+    }
+  };
 
-        if (emoteUrl) {
-          return (
-            <img
-              key={i}
-              src={emoteUrl}
-              alt={token}
-              title={token}
-              className="inline-block h-[1.3em] max-h-5 min-w-[1.2em] w-auto align-middle mx-0.5 object-contain select-none transition-transform hover:scale-125"
-              loading="lazy"
-            />
-          );
-        }
+  for (const token of tokens) {
+    // If it's pure whitespace, render as-is
+    if (/^\s+$/.test(token)) {
+      plain += token;
+      continue;
+    }
 
-        // Check if token matches highlighted vote token
-        if (matchedToken && token.toLowerCase() === matchedToken.toLowerCase()) {
-          return (
-            <span key={i} className="bg-primary/20 text-primary font-semibold px-0.5 rounded">
-              {token}
-            </span>
-          );
-        }
+    // Check if token matches an emote in emoteMap
+    let emoteUrl: string | undefined;
+    if (emoteMap) {
+      if (emoteMap instanceof Map) {
+        emoteUrl = emoteMap.get(token) || emoteMap.get(token.toLowerCase());
+      } else {
+        emoteUrl = emoteMap[token] || emoteMap[token.toLowerCase()];
+      }
+    }
 
-        return <span key={i}>{token}</span>;
-      })}
-    </span>
-  );
+    if (emoteUrl) {
+      flushPlain();
+      nodes.push(
+        <img
+          key={key++}
+          src={emoteUrl}
+          alt={token}
+          title={token}
+          className="inline-block h-[1.3em] max-h-5 min-w-[1.2em] w-auto align-middle mx-0.5 object-contain select-none transition-transform hover:scale-125"
+          loading="lazy"
+        />
+      );
+      continue;
+    }
+
+    // Check if token matches highlighted vote token
+    if (matchedToken && token.toLowerCase() === matchedToken.toLowerCase()) {
+      flushPlain();
+      nodes.push(
+        <span key={key++} className="bg-primary/20 text-primary font-semibold px-0.5 rounded">
+          {token}
+        </span>
+      );
+      continue;
+    }
+
+    plain += token;
+  }
+
+  flushPlain();
+
+  return <span>{nodes}</span>;
 }
